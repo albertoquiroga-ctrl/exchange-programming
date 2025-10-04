@@ -23,8 +23,12 @@
 #   exclude_tickers(['AAPL', 'MSFT', 'AMGN'])
 #   > ['AMGN']
 def exclude_tickers(tickers):
-    # do something here
-    return # replace this line with your code
+    excluded = {'MSFT', 'AAPL', 'GOOGL'}
+    result = []
+    for ticker in tickers:
+        if ticker not in excluded:
+            result.append(ticker)
+    return result
 
 
 # Question 2
