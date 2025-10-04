@@ -1,0 +1,54 @@
+# An example of while loop.
+# - Print odd number of a list
+# - We can use for loop to do the same thing
+
+
+print("Example 1")
+numbers = [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15]
+start_index = 0
+
+while start_index < len(numbers): # the following lines will be executed if the condition is True
+    num = numbers[start_index]  # pop get the first item from the list and remove it from the list
+    if num % 2 == 1:
+        print(num)
+
+    start_index += 1
+
+    # after all line of codes under the while block is executed, the while condition will be
+    #  evaluated again.
+
+
+print("Example 2")
+
+# An example of while loop.
+# - Print the first 3 odd number of a list
+# - We can use for loop to do the same thing
+
+numbers = [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15]
+
+count_odd = 0
+start_index = 0
+
+while count_odd < 3 and start_index < len(numbers): # the following lines will be executed if the condition is True
+    num = numbers[start_index]  # pop get the first item from the list and remove it from the list
+    if num % 2 == 1:
+        print(num)
+        count_odd += 1
+
+    start_index += 1
+
+    # after all line of codes under the while block is executed, the while condition will be
+    #  evaluated again.
+
+
+
+print("Example 3")
+# An example of using while True loop to do control
+
+while True:  # as the condition is always True, the loop will run forever.
+    user_input = input("Enter user input: ")
+
+    if user_input == "exit":
+        break # except hitting a break that will exit the loop
+
+    print("Do something")
