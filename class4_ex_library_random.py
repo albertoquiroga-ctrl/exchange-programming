@@ -1,6 +1,6 @@
 # Class Exercise 4: Library and Random
 # Create the functions below EXACTLY as specified.
-# ⚠️ AUTO-GRADER CRITICAL WARNING ⚠️
+# AUTO-GRADER CRITICAL WARNING
 # - Changing function names/parameters will cause 50% score deduction
 # - Incorrect return types/formats will result in 0 marks for that question
 # - Comments are ignored by Python and auto-grader (you can add your own)
@@ -21,13 +21,19 @@
 #
 #   generate_random_numbers(0)
 #   > []
+
+import math
 import random
 
+
 def generate_random_numbers(n):
+    """Return a list of n random integers between 1 and 100 inclusive."""
+    if not isinstance(n, int):
+        raise TypeError("n must be an integer")
+    if n < 0:
+        raise ValueError("n must be non-negative")
     return [random.randint(1, 100) for _ in range(n)]
 
-n = int(input('Enter a number:'))
-print(generate_random_numbers(n))
 
 # Question 2
 # Function Name: random_choice
@@ -45,10 +51,16 @@ print(generate_random_numbers(n))
 #
 #   random_choice(['IBM', 'NVDA', 'MSFT'])
 #   > 'NVDA' (output may vary)
+
 def random_choice(choices):
-    return random.choice(choices)   
-choices = input('Enter stock tickers separated by commas:').split(',')
-print(random_choice(choices))
+    """Return a random choice from the provided list of stock tickers."""
+    if not isinstance(choices, list):
+        raise TypeError("choices must be provided as a list")
+    if not choices:
+        raise ValueError("choices must not be empty")
+    return random.choice(choices)
+
+
 # Question 3
 # Function Name: import_and_use_math
 # Number of Input Parameters:
@@ -65,8 +77,21 @@ print(random_choice(choices))
 #
 #   import_and_use_math(2.0)
 #   > 1.4142135623730951
-import math
+
 def import_and_use_math(x):
+    """Return the square root of x using the math library."""
+    if x < 0:
+        raise ValueError("x must be non-negative to compute a real square root")
     return math.sqrt(x)
-x = float(input('Enter a float number:'))
-print(import_and_use_math(x))
+
+
+if __name__ == "__main__":
+    user_n = int(input("Enter a number: "))
+    print(generate_random_numbers(user_n))
+
+    user_choices = input("Enter stock tickers separated by commas: ").split(",")
+    user_choices = [choice.strip() for choice in user_choices]
+    print(random_choice(user_choices))
+
+    user_x = float(input("Enter a float number: "))
+    print(import_and_use_math(user_x))
