@@ -23,8 +23,12 @@
 #   exclude_tickers(['AAPL', 'MSFT', 'AMGN'])
 #   > ['AMGN']
 def exclude_tickers(tickers):
-    # do something here
-    return # replace this line with your code
+    excluded = {"MSFT", "AAPL", "GOOGL"}
+    filtered_tickers = []
+    for ticker in tickers:
+        if ticker not in excluded:
+            filtered_tickers.append(ticker)
+    return filtered_tickers
 
 
 # Question 2
@@ -44,6 +48,13 @@ def exclude_tickers(tickers):
 #
 #   exclude_blacklisted_tickers(['IBM', 'GOOGL', 'TSLA'], ['IBM', 'TSLA'])
 #   > ['GOOGL']
+def exclude_blacklisted_tickers(tickers, blacklisted):
+    blacklist_set = set(blacklisted)
+    result = []
+    for ticker in tickers:
+        if ticker not in blacklist_set:
+            result.append(ticker)
+    return result
 
 
 # Question 3
@@ -62,6 +73,11 @@ def exclude_tickers(tickers):
 #
 #   create_10_multiples_list(0)
 #   > []
+def create_10_multiples_list(n):
+    multiples = []
+    for multiplier in range(1, n + 1):
+        multiples.append(multiplier * 10)
+    return multiples
 
 
 # Question 4
@@ -80,6 +96,12 @@ def exclude_tickers(tickers):
 #
 #   count_income_above_threshold([1100.0, 2000.0, 500.0])
 #   > 2
+def count_income_above_threshold(incomes):
+    count = 0
+    for income in incomes:
+        if income > 1000:
+            count += 1
+    return count
 
 
 # Question 5
@@ -98,6 +120,12 @@ def exclude_tickers(tickers):
 #
 #   sum_income_above_threshold([1100.0, 2000.0, 500.0])
 #   > 3100.0
+def sum_income_above_threshold(incomes):
+    total = 0.0
+    for income in incomes:
+        if income > 1000:
+            total += income
+    return total
 
 
 # Question 6
@@ -115,6 +143,20 @@ def exclude_tickers(tickers):
 #
 #   count_items_above_average([100.0, 200.0, 300.0])
 #   > 2
+def count_items_above_average(numbers):
+    if not numbers:
+        return 0
+
+    total = 0.0
+    for value in numbers:
+        total += value
+    average = total / len(numbers)
+
+    count = 0
+    for value in numbers:
+        if value > average:
+            count += 1
+    return count
 
 # Question 7
 # Function Name: calculate_daily_percentage_return
@@ -132,6 +174,17 @@ def exclude_tickers(tickers):
 #
 #   calculate_daily_percentage_return([50.0, 50.0, 50.0])
 #   > [0.0, 0.0]
+def calculate_daily_percentage_return(prices):
+    returns = []
+    for index in range(1, len(prices)):
+        previous_price = prices[index - 1]
+        current_price = prices[index]
+        if previous_price == 0:
+            percentage_change = 0.0
+        else:
+            percentage_change = ((current_price - previous_price) / previous_price) * 100
+        returns.append(round(percentage_change, 2))
+    return returns
 
 
 # Question 8
@@ -151,3 +204,8 @@ def exclude_tickers(tickers):
 #
 #   calculate_monthly_net_income([1000.0], [500.0])
 #   > [500.0]
+def calculate_monthly_net_income(incomes, expenses):
+    net_incomes = []
+    for income, expense in zip(incomes, expenses):
+        net_incomes.append(income - expense)
+    return net_incomes
