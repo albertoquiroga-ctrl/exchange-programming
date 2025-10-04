@@ -1,6 +1,6 @@
 ﻿# Class Exercise 5: While Looping
 # Create the functions below EXACTLY as specified.
-# s??? AUTO-GRADER CRITICAL WARNING s???
+# AUTO-GRADER CRITICAL WARNING
 # - Changing function names/parameters will cause 50% score deduction
 # - Incorrect return types/formats will result in 0 marks for that question
 # - Comments are ignored by Python and auto-grader (you can add your own)
