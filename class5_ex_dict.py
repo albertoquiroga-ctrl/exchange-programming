@@ -1,6 +1,6 @@
-# Class Exercise 5: Dictionary
+﻿# Class Exercise 5: Dictionary
 # Create the functions below EXACTLY as specified.
-# ⚠️ AUTO-GRADER CRITICAL WARNING ⚠️
+#  AUTO-GRADER CRITICAL WARNING
 # - Changing function names/parameters will cause 50% score deduction
 # - Incorrect return types/formats will result in 0 marks for that question
 # - Comments are ignored by Python and auto-grader (you can add your own)
@@ -23,6 +23,11 @@
 # > {'GOOG': 50, 'AMZN': 300}
 # exclude_blacklisted_tickers_dict({'IBM': 150}, ['IBM', 'TSLA'])
 #> {}
+def exclude_blacklisted_tickers_dict(portfolio, blacklist):
+    """Return a new portfolio dictionary excluding blacklisted tickers."""
+    return {ticker: quantity for ticker, quantity in portfolio.items() if ticker not in blacklist}
+
+print("exclude_blacklisted_tickers_dict:", exclude_blacklisted_tickers_dict({'MSFT': 100, 'AAPL': 200}, ['MSFT']))
 
 
 # Question 2
@@ -42,6 +47,12 @@
 # > 250.0
 # sum_holdings_above_threshold({'E': 100.0}, 150.0)
 # > 0.0
+def sum_holdings_above_threshold(portfolio, threshold):
+    """Sum holdings that are strictly above the given threshold."""
+    total = sum(quantity for quantity in portfolio.values() if quantity > threshold)
+    return float(total)
+
+print("sum_holdings_above_threshold:", sum_holdings_above_threshold({'A': 500.0, 'B': 200.0}, 300.0))
 
 
 # Question 3
@@ -60,6 +71,14 @@
 # > 500.0
 # average_transaction_value({})
 # > 0.0
+def average_transaction_value(transactions):
+    """Compute the average value of transactions; return 0.0 when empty."""
+    if not transactions:
+        return 0.0
+    total = sum(transactions.values())
+    return float(total) / len(transactions)
+
+print("average_transaction_value:", average_transaction_value({'T1': 100.0, 'T2': 200.0}))
 
 
 # Question 4
@@ -78,6 +97,14 @@
 # > 0
 # count_transactions_above_average({'T6': 500})
 # > 0
+def count_transactions_above_average(transactions):
+    """Count how many transactions are strictly above the average amount."""
+    if not transactions:
+        return 0
+    average_value = average_transaction_value(transactions)
+    return sum(1 for amount in transactions.values() if amount > average_value)
+
+print("count_transactions_above_average:", count_transactions_above_average({'T1': 100, 'T2': 200, 'T3': 300}))
 
 
 # Question 5
@@ -96,6 +123,21 @@
 # > {'2023-02-02': 10.0, '2023-02-03': -4.55}
 # calculate_daily_returns({'2023-03-01': 50.0})
 # > {}
+def calculate_daily_returns(prices):
+    """Calculate day-over-day percentage returns rounded to two decimals."""
+    items = list(prices.items())
+    daily_returns = {}
+    for index in range(1, len(items)):
+        _, previous_price = items[index - 1]
+        current_date, current_price = items[index]
+        if previous_price == 0:
+            change = 0.0
+        else:
+            change = ((current_price - previous_price) / previous_price) * 100
+        daily_returns[current_date] = round(change, 2)
+    return daily_returns
+
+print("calculate_daily_returns:", calculate_daily_returns({'2023-02-01': 200.0, '2023-02-02': 220.0, '2023-02-03': 210.0}))
 
 
 # Question 6
@@ -115,6 +157,14 @@
 # > {'X': 200, 'Y': 300}
 # merge_portfolios({}, {'Z': 150})
 # > {'Z': 150}
+def merge_portfolios(portfolio1, portfolio2):
+    """Merge two portfolios, summing quantities for duplicate tickers."""
+    merged = dict(portfolio1)
+    for ticker, quantity in portfolio2.items():
+        merged[ticker] = merged.get(ticker, 0) + quantity
+    return merged
+
+print("merge_portfolios:", merge_portfolios({'AAPL': 50}, {'AAPL': 30, 'MSFT': 100}))
 
 
 # Question 7
@@ -133,6 +183,12 @@
 # > {'MSFT': 52.5, 'GOOG': 210.0}
 # apply_percentage_increase({}, 20.0)
 # > {}
+def apply_percentage_increase(portfolio, percentage):
+    """Increase each ticker price by the given percentage, rounded to two decimals."""
+    factor = 1 + (percentage / 100)
+    return {ticker: round(price * factor, 2) for ticker, price in portfolio.items()}
+
+print("apply_percentage_increase:", apply_percentage_increase({'MSFT': 50.0, 'GOOG': 200.0}, 5.0))
 
 
 # Question 8
@@ -151,3 +207,16 @@
 # > 'X'
 # find_max_holding({})
 # > None
+def find_max_holding(portfolio):
+    """Return the ticker with the highest quantity (first occurrence on ties)."""
+    if not portfolio:
+        return None
+    max_ticker = None
+    max_quantity = None
+    for ticker, quantity in portfolio.items():
+        if max_quantity is None or quantity > max_quantity:
+            max_ticker = ticker
+            max_quantity = quantity
+    return max_ticker
+
+print("find_max_holding:", find_max_holding({'A': 500, 'B': 700}))
