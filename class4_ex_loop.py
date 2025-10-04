@@ -23,12 +23,12 @@
 #   exclude_tickers(['AAPL', 'MSFT', 'AMGN'])
 #   > ['AMGN']
 def exclude_tickers(tickers):
-    excluded = {"MSFT", "AAPL", "GOOGL"}
-    filtered_tickers = []
+    excluded = {'MSFT', 'AAPL', 'GOOGL'}
+    result = []
     for ticker in tickers:
         if ticker not in excluded:
-            filtered_tickers.append(ticker)
-    return filtered_tickers
+            result.append(ticker)
+    return result
 
 
 # Question 2
@@ -55,6 +55,15 @@ def exclude_blacklisted_tickers(tickers, blacklisted):
         if ticker not in blacklist_set:
             result.append(ticker)
     return result
+
+
+def exclude_blacklisted_tickers(tickers, blacklisted):
+    """Return tickers excluding any symbols in the blacklist."""
+    filtered_tickers = []
+    for ticker in tickers:
+        if ticker not in blacklisted:
+            filtered_tickers.append(ticker)
+    return filtered_tickers
 
 
 # Question 3
