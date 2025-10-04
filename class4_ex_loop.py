@@ -50,6 +50,15 @@ def exclude_tickers(tickers):
 #   > ['GOOGL']
 
 
+def exclude_blacklisted_tickers(tickers, blacklisted):
+    """Return tickers excluding any symbols in the blacklist."""
+    filtered_tickers = []
+    for ticker in tickers:
+        if ticker not in blacklisted:
+            filtered_tickers.append(ticker)
+    return filtered_tickers
+
+
 # Question 3
 # Function Name: create_10_multiples_list
 # Input Parameters:
