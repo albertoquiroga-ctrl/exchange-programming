@@ -1,4 +1,12 @@
-"""Fetch last week's prices for a set of tickers and report weekly returns."""
+"""Question 1 requirements (keep for easy reference inside the file).
+
+1. Install `yfinance` with `py -m pip install yfinance`.
+2. Provide `get_price_lastweek(ticker)` that fetches Monday–Friday prices for last week.
+3. Call that function for AAPL, MSFT, NVDA, TSLA, MS, GS.
+4. Report which ticker delivered the highest return (Friday close ÷ Monday open).
+
+Below implements the solution and prints the requested information.
+"""
 
 from __future__ import annotations
 
@@ -21,8 +29,12 @@ def _last_week_range(reference: date | None = None) -> tuple[date, date]:
 
 
 def get_price_lastweek(ticker: str) -> pd.DataFrame:
-    """Download OHLC data for the ticker covering last week's trading days."""
+    """Download OHLC data for the ticker covering last week's trading days.
+
+    Implements Step 2 by pulling the raw prices and keeping only the target week.
+    """
     monday, friday = _last_week_range()
+    # Step 2: download daily candles for the prior week using yfinance.
     raw_df = yf.download(
         ticker,
         start=monday.isoformat(),
@@ -37,7 +49,7 @@ def get_price_lastweek(ticker: str) -> pd.DataFrame:
 
     df = cast(pd.DataFrame, raw_df).copy()
 
-    # Ensure the index is a DatetimeIndex without timezone info and sorted.
+    # Clean up index/columns so downstream logic gets predictable structures.
     df.index = pd.DatetimeIndex(pd.to_datetime(df.index).tz_localize(None))
     df = df.sort_index()
     dt_index = cast(pd.DatetimeIndex, df.index)
@@ -59,7 +71,10 @@ def get_price_lastweek(ticker: str) -> pd.DataFrame:
 
 
 def compute_weekly_returns(tickers: list[str]) -> Dict[str, float]:
-    """Calculate weekly returns for each ticker based on Monday open and Friday close."""
+    """Calculate weekly returns for each ticker based on Monday open and Friday close.
+
+    Addresses the return calculation needed for Step 4.
+    """
     returns: Dict[str, float] = {}
     for ticker in tickers:
         prices = get_price_lastweek(ticker)
@@ -71,6 +86,7 @@ def compute_weekly_returns(tickers: list[str]) -> Dict[str, float]:
 
 
 if __name__ == "__main__":
+    # Step 3: gather weekly prices for each requested ticker.
     watchlist = ["AAPL", "MSFT", "NVDA", "TSLA", "MS", "GS"]
 
     for symbol in watchlist:
@@ -78,6 +94,7 @@ if __name__ == "__main__":
         print(f"\n{symbol} prices last week:")
         print(weekly_prices)
 
+    # Step 4: compute and compare returns, then announce the top performer.
     weekly_returns = compute_weekly_returns(watchlist)
     print("\nWeekly returns (Friday close over Monday open):")
     for symbol, rtn in weekly_returns.items():
