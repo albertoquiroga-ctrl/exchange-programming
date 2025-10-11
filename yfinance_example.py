@@ -56,6 +56,10 @@ def get_multiple_stocks_data(ticker_symbols, start_date, end_date):
 ticker_list = ["AAPL", "GOOGL", "MSFT", "TSLA"]
 print_all_data(ticker_list[0], "2025-09-01", "2025-10-01")
 
-print(get_multiple_stocks_data(ticker_list, "2025-09-01", "2025-10-01")["Close"]["TSLA"])
+data = get_multiple_stocks_data(ticker_list, "2025-09-01", "2025-10-01")
+if data is not None and "Close" in data and "TSLA" in data["Close"]:
+    print(data["Close"]["TSLA"])
+else:
+    print("No data available for TSLA in the specified date range.")
 
 
