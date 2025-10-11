@@ -32,7 +32,7 @@ def exclude_blacklisted_tickers_dict(portfolio, blacklist):
             filtered_portfolio[ticker] = quantity
     return filtered_portfolio
 
-sample_portfolio_q1 = {'MSFT': 100, 'AAPL': 200}
+sample_portfolio_q1 = {'MSFT': 100, 'AAPL': 200, "GOOG": 50}
 sample_blacklist_q1 = ['MSFT']
 sample_result_q1 = exclude_blacklisted_tickers_dict(sample_portfolio_q1, sample_blacklist_q1)
 print("exclude_blacklisted_tickers_dict:", sample_result_q1)
