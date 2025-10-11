@@ -16,10 +16,6 @@ def print_all_data(ticker_symbol, start_date, end_date):
     print("Historical Data with Start/End Dates:")
     print(historical_data)
 
-
-    print("Historical Data:")
-    print(historical_data)
-
     # Financial Data
     financials = ticker.financials
     print("Financials:")
@@ -30,10 +26,20 @@ def print_all_data(ticker_symbol, start_date, end_date):
     print("Stock Actions:")
     print(actions)
 
-    for news_article in ticker.news:
-        print(json.dumps(news_article, indent=2, default=str))
-        print(news_article["content"]["title"])
-        print("-" * 50) # separator between articles
+    news_items = ticker.news or []
+    if not news_items:
+        print("No news articles found.")
+    else:
+        print("News:")
+        for news_article in news_items:
+            print(json.dumps(news_article, indent=2, default=str))
+            title = news_article.get("title")
+            if not title:
+                content = news_article.get("content")
+                if isinstance(content, dict):
+                    title = content.get("title")
+            print(title or "Title not available")
+            print("-" * 50)  # separator between articles
 
 
 
@@ -51,6 +57,5 @@ ticker_list = ["AAPL", "GOOGL", "MSFT", "TSLA"]
 print_all_data(ticker_list[0], "2025-09-01", "2025-10-01")
 
 print(get_multiple_stocks_data(ticker_list, "2025-09-01", "2025-10-01")["Close"]["TSLA"])
-
 
 
