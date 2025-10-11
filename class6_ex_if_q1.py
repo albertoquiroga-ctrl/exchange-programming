@@ -8,4 +8,4 @@ def cal_formula(x: int, y: int):
 
 print(cal_formula(11, 6))  # example: regular division
 print(cal_formula(8, 1))   # example: denominator would be zero
-print(cal_formula(5, 2))   # extra: fractional result
+print(cal_formula(6, 4))   # extra: fractional result

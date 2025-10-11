@@ -7,4 +7,4 @@ def cal_formula(x, y):
 
 print(cal_formula(11, 6))  # expected 2.0
 print(cal_formula(8, 1))   # expected 0 because of division by zero
-print(cal_formula(5, 2))   # expected 4.0
+print(cal_formula(6, 4))   # expected 4.0

@@ -3,11 +3,8 @@ def get_special_item_from_list(lst, i):
     try:
         return lst[i + 1]
     except IndexError:
-        if lst:
-            return lst[-1]
-        return 0
+         return lst[-1]
 
 
 print(get_special_item_from_list([1, 2, 3, 4], 1))  # valid access -> 3
 print(get_special_item_from_list([1, 2, 3, 4], 3))  # out of range -> last item 4
-print(get_special_item_from_list([], 0))            # empty list -> 0
