@@ -35,7 +35,3 @@ def main() -> None:
     end_date = format_date(last_friday)
     print(f"Start date: {start_date}")
     print(f"End date: {end_date}")
-
-
-if __name__ == "__main__":
-    main()

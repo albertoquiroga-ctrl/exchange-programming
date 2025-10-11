@@ -61,5 +61,3 @@ if data is not None and "Close" in data and "TSLA" in data["Close"]:
     print(data["Close"]["TSLA"])
 else:
     print("No data available for TSLA in the specified date range.")
-
-
