@@ -19,7 +19,6 @@ new_word()
 
 
 
-
 def new_word():
     try:
         word, definition, hint = input("Enter a new words (word|definition|hint)").split("|")
@@ -34,3 +33,26 @@ def new_word():
         new_word()
 
 
+def err_example_preventive():
+    stock_ticker = ["AAPL", "NVDA", "MSFT", "TSLA"]
+    index = input("Enter the Index")
+    
+    if index.isdigit() and int(index) < len(stock_ticker):
+        print(stock_ticker[int(index)])
+    else:
+        print("Invalid Index")
+
+    err_example_preventive()
+
+def err_example_reactive():
+    stock_ticker = ["AAPL", "NVDA", "MSFT", "TSLA"]
+    
+    try:
+        index = int(input("Enter the Index"))
+        print(stock_ticker[index])
+    except IndexError:
+        print("Invalid index")
+    except ValueError:
+        print("enter integer as index")
+    
+    err_example_reactive()
