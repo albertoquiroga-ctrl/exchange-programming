@@ -1,8 +1,10 @@
 def cal_formula(x, y):
     try:
-        result = (x + y) / (x - y)
-        return result
+        return (x - 1) / (y - 1)
     except ZeroDivisionError:
-        return "Error: Division by zero is not allowed."
-    except TypeError:
-        return "Error: Invalid input type. Please provide numbers."
+        return 0
+
+
+print(cal_formula(11, 6))  # expected 2.0
+print(cal_formula(8, 1))   # expected 0 because of division by zero
+print(cal_formula(5, 2))   # expected 2.0
