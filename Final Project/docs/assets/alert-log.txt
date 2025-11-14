@@ -1,2 +1,6 @@
+# Sample console transcript used in presentation rehearsals.
+# Format mirrors the `ConsoleMessenger` output so teammates can paste new
+# dry-run alerts here without re-recording audio.  New entries should keep the
+# two-line structure: a timestamped header followed by the human description.
 2025-11-14 14:57:07,751 [INFO] hk_monitor.alerts - [DRY RUN] [WARNINGS] TC8 -> RED
 Red rainstorm warning upgraded.

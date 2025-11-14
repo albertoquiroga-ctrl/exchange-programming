@@ -57,6 +57,7 @@ A consolidated workspace for my exchange-course exercises. It tracks every lectu
 ### Final deliverables & references
 | Path | Purpose |
 | --- | --- |
+| `Final Project/hk_monitor/` | Final code for the HK Conditions Monitor (CLI dashboard, collectors, SQLite helpers, alerting tests). See its README for setup and module-by-module walkthroughs. |
 | `Final Project/ECON7890 Project 2025 Fall.pdf` | Final project write-up. |
 | `ECON7890 - Course Intro - 202509.pdf`, `ECON7890 - Python and Tools.pdf`, `ECON 7890_Big_Data_Analytics_Programming_20190710.pdf` | Slide decks and course material PDFs. |
 | `References/pythonlearn (1).pdf` | Additional reading (Think Python companion). |
