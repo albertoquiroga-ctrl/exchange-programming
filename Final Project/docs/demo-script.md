@@ -1,7 +1,7 @@
 # Demo Script
 
 1. **Prep**
-   - Ensure `config.toml` points to mock data and `telegram.test_mode = true`.
+   - Ensure `config.toml` points to mock data so collectors stay deterministic.
    - Run `pytest` to show all narrative scripts passing.
 
 2. **CLI walkthrough**
@@ -12,8 +12,8 @@
 
 3. **Warning upgrade scenario**
    - Swap `mocks.warnings` in `config.toml` to `tests/data/warnings_red.json` and refresh.
-   - Point out the highlighted **Warnings** tile and the Telegram dry-run output.
-  - When narrating the alert, show the locally stored Telegram dry-run screenshot (`docs/assets/telegram-dryrun.png`) and read the quick reference log at `docs/assets/alert-log.txt` so the audience can follow along.
+   - Point out the highlighted **Warnings** tile and the console alert transcript.
+  - When narrating the alert, show the locally stored dashboard screenshot (`docs/assets/dashboard-tiles.png`) and read the quick reference log at `docs/assets/alert-log.txt` so the audience can follow along.
 
 4. **AQHI spike scenario**
    - Use `tests/data/aqhi_spike.json` as the AQHI mock payload.
@@ -25,4 +25,4 @@
 
 6. **Wrap-up**
    - Summarise architecture (reference the diagram), validation, tests, and next steps.
-  - Reuse the screenshots (`docs/assets/dashboard-tiles.png` and `docs/assets/telegram-dryrun.png` saved locally) plus the alert log in the slide deck/report to document visual proof of the system.
+  - Reuse the dashboard screenshot and console alert log in the slide deck/report to document visual proof of the system.

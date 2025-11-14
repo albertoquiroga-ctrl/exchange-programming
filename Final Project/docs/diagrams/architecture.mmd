@@ -10,7 +10,7 @@ graph TD
         CFG["Config loader & validation"]
         COLLECT["Collector module"]
         DB[("SQLite snapshots")]
-        ALERTS["Change detector + Telegram client"]
+        ALERTS["Change detector + console messenger"]
         CLI["Interactive CLI dashboard"]
     end
 
@@ -24,4 +24,3 @@ graph TD
     DB --> CLI
     DB --> ALERTS
     ALERTS --> CLI
-    ALERTS --> TELEGRAM["Telegram Bot API"]

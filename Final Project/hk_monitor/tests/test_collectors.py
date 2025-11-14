@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+import io
 
 import requests
 
@@ -31,7 +32,7 @@ def test_collect_once_persists(tmp_path):
         assert snapshot["rain"] is not None
 
 
-def test_change_detector_emits_alert_on_category_change(tmp_path, capsys):
+def test_change_detector_emits_alert_on_category_change(tmp_path):
     config = _load_config()
     config.app = replace(config.app, database_path=tmp_path / "test.db")
     with db.connect(config.app.database_path) as conn:
@@ -47,10 +48,11 @@ def test_change_detector_emits_alert_on_category_change(tmp_path, capsys):
         )
         db.save_warning(conn, older)
         db.save_warning(conn, newer)
-        messenger = alerts.TelegramClient(token="", chat_id="", enabled=False, test_mode=True)
+        buffer = io.StringIO()
+        messenger = alerts.ConsoleMessenger(stream=buffer)
         detector = alerts.ChangeDetector(conn, messenger)
         detector.run()
-        captured = capsys.readouterr().out
+        captured = buffer.getvalue()
         assert "TC3" in captured
         assert "TC8" in captured
 

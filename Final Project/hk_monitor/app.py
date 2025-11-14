@@ -12,7 +12,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set
 import pandas as pd
 
 from . import alerts, collector, db
-from .alerts import ChangeDetector, TelegramClient
+from .alerts import ChangeDetector, ConsoleMessenger
 from .config import Config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s - %(message)s")
@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--alerts",
         action="store_true",
-        help="Run change detection and emit alerts after refreshing data.",
+        help="Run change detection and print alerts after refreshing data.",
     )
     return parser.parse_args()
 
@@ -86,7 +86,7 @@ class DashboardSession:
         collector.collect_once(self.config, self.conn)
         snapshot = db.get_latest(self.conn)
         if self.enable_alerts:
-            messenger = _CapturingMessenger(self.config)
+            messenger = _RecordingMessenger()
             ChangeDetector(self.conn, messenger).run()
             self.alert_metrics = {message.metric for message in messenger.messages}
         else:
@@ -182,21 +182,16 @@ class DashboardSession:
             print(f"  {idx}. {value}")
 
 
-class _CapturingMessenger(TelegramClient):
-    """Telegram client that stores alert messages for highlighting in the CLI."""
+class _RecordingMessenger(ConsoleMessenger):
+    """Console messenger that keeps the alert list for highlighting."""
 
-    def __init__(self, config: Config):
-        super().__init__(
-            token=config.telegram.bot_token,
-            chat_id=config.telegram.chat_id,
-            enabled=config.telegram.enabled,
-            test_mode=config.telegram.test_mode,
-        )
+    def __init__(self) -> None:
+        super().__init__()
         self.messages: List[alerts.AlertMessage] = []
 
     def send(self, message: alerts.AlertMessage) -> None:  # type: ignore[override]
-        self.messages.append(message)
         super().send(message)
+        self.messages.append(message)
 
 
 def _load_menu_options(config: Config) -> Dict[str, List[str]]:

@@ -23,17 +23,6 @@ class AppConfig:
 
 
 @dataclass(slots=True)
-class TelegramConfig:
-    bot_token: str
-    chat_id: str
-    test_mode: bool = False
-
-    @property
-    def enabled(self) -> bool:
-        return bool(self.bot_token and self.chat_id)
-
-
-@dataclass(slots=True)
 class ApiConfig:
     warnings_url: str
     rainfall_url: str
@@ -52,7 +41,6 @@ class MockPaths:
 @dataclass(slots=True)
 class Config:
     app: AppConfig
-    telegram: TelegramConfig
     api: ApiConfig
     mocks: MockPaths
 
@@ -77,7 +65,6 @@ class Config:
 
         return cls(
             app=_parse_app_config(data.get("app", {}), config_path.parent),
-            telegram=_parse_telegram_config(data.get("telegram", {})),
             api=_parse_api_config(data.get("api", {})),
             mocks=_parse_mock_paths(data.get("mocks", {}), config_path.parent),
         )
@@ -95,14 +82,6 @@ def _parse_app_config(data: Dict[str, Any], base: Path) -> AppConfig:
         aqhi_station=_require_str(data.get("aqhi_station", "Central/Western"), "app.aqhi_station"),
         traffic_region=_require_str(data.get("traffic_region", "Hong Kong Island"), "app.traffic_region"),
         use_mock_data=bool(data.get("use_mock_data", False)),
-    )
-
-
-def _parse_telegram_config(data: Dict[str, Any]) -> TelegramConfig:
-    return TelegramConfig(
-        bot_token=str(data.get("bot_token", "")),
-        chat_id=str(data.get("chat_id", "")),
-        test_mode=bool(data.get("test_mode", False)),
     )
 
 
@@ -145,7 +124,6 @@ def _require_str(value: Any, field_name: str) -> str:
 
 __all__ = [
     "AppConfig",
-    "TelegramConfig",
     "ApiConfig",
     "MockPaths",
     "Config",

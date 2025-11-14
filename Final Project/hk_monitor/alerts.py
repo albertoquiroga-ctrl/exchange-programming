@@ -1,13 +1,12 @@
-"""Change detection and alert routing."""
+"""Change detection utilities for the HK Conditions Monitor."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Protocol, TextIO
 import logging
 import sqlite3
-import requests
+import sys
 
-from .config import Config
 from . import db
 
 logger = logging.getLogger(__name__)
@@ -25,33 +24,33 @@ class AlertMessage:
         return f"{header}\n{self.description}"
 
 
-class TelegramClient:
-    """Minimal Telegram sender wrapping the HTTP Bot API."""
-
-    def __init__(self, token: str, chat_id: str, enabled: bool, test_mode: bool = False):
-        self.token = token
-        self.chat_id = chat_id
-        self.enabled = enabled
-        self.test_mode = test_mode
+class Messenger(Protocol):
+    """Simple protocol describing objects that can receive alert messages."""
 
     def send(self, message: AlertMessage) -> None:
-        payload = {"chat_id": self.chat_id, "text": message.format()}
-        if not self.enabled or self.test_mode:
-            logger.info("[DRY RUN] %s", payload["text"])
-            print(payload["text"])  # pragma: no cover - CLI feedback
-            return
-        response = requests.post(
-            f"https://api.telegram.org/bot{self.token}/sendMessage",
-            timeout=10,
-            json=payload,
-        )
-        response.raise_for_status()
+        ...
+
+
+class ConsoleMessenger:
+    """Messenger that prints alerts to stdout for local demos."""
+
+    def __init__(self, stream: Optional[TextIO] = None):
+        self.stream = stream or sys.stdout
+
+    def send(self, message: AlertMessage) -> None:  # pragma: no cover - console feedback
+        text = message.format()
+        logger.info("[ALERT] %s", text.replace("\n", " | "))
+        print(text, file=self.stream)
 
 
 class ChangeDetector:
-    def __init__(self, conn: sqlite3.Connection, messenger: TelegramClient):
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        messenger: Optional[Messenger] = None,
+    ):
         self.conn = conn
-        self.messenger = messenger
+        self.messenger = messenger or ConsoleMessenger()
         self.table_config: Dict[str, Callable[[sqlite3.Row], AlertMessage]] = {
             "warnings": self._format_warning,
             "rain": self._format_rain,
@@ -105,21 +104,6 @@ class ChangeDetector:
             current=row["severity"],
             description=row["description"],
         )
-
-
-def run_alerts(config: Config) -> None:
-    from .db import connect
-
-    with connect(config.app.database_path) as conn:
-        messenger = TelegramClient(
-            token=config.telegram.bot_token,
-            chat_id=config.telegram.chat_id,
-            enabled=config.telegram.enabled,
-            test_mode=config.telegram.test_mode,
-        )
-        ChangeDetector(conn, messenger).run()
-
-
 def _extract_category(row: sqlite3.Row) -> str:
     for key in ("category", "level", "intensity", "severity"):
         if key in row.keys():
@@ -127,4 +111,4 @@ def _extract_category(row: sqlite3.Row) -> str:
     return ""
 
 
-__all__ = ["run_alerts", "ChangeDetector", "TelegramClient", "AlertMessage"]
+__all__ = ["ChangeDetector", "AlertMessage", "ConsoleMessenger", "Messenger"]

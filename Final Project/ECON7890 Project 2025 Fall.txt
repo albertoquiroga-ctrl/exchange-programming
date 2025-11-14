@@ -46,6 +46,7 @@ News sentiment analysis
 Analysis of Openrice restaurant reviews
 Predict when will limited Chiikawa toys be sold
 
+(Project note: scope reduced to console-only alerts; no external messaging service is invoked.)
 Basic programming (30%)
 1.
 

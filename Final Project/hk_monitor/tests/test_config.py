@@ -26,11 +26,6 @@ aqhi_station = "Central/Western"
 traffic_region = "Hong Kong Island"
 use_mock_data = true
 
-[telegram]
-bot_token = ""
-chat_id = ""
-test_mode = true
-
 [api]
 warnings_url = "https://example.com/warnings"
 rainfall_url = "https://example.com/rain"
