@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 import os
+import re
 
 try:  # Python >=3.11
     import tomllib  # type: ignore[attr-defined]
@@ -60,8 +61,8 @@ class Config:
                 "Copy config.template.toml to config.toml and adjust the values."
             )
 
-        with config_path.open("rb") as fh:
-            data = tomllib.load(fh)
+        text = config_path.read_text(encoding="utf-8")
+        data = _parse_toml(text)
 
         return cls(
             app=_parse_app_config(data.get("app", {}), config_path.parent),
@@ -120,6 +121,37 @@ def _require_str(value: Any, field_name: str) -> str:
     if not text:
         raise ValueError(f"Configuration field '{field_name}' is required")
     return text
+
+
+_WINDOWS_PATH_KEYS = ("database_path", "warnings", "rainfall", "aqhi", "traffic")
+_WINDOWS_PATH_PATTERN = re.compile(
+    r'^(\s*(?:' + "|".join(_WINDOWS_PATH_KEYS) + r")\s*=\s*)\"([^\"\n]*)\"",
+    re.MULTILINE,
+)
+
+
+def _parse_toml(text: str) -> Dict[str, Any]:
+    """Load TOML text, tolerating Windows-style paths without escaping."""
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        sanitised = _normalise_windows_paths(text)
+        if sanitised != text:
+            try:
+                return tomllib.loads(sanitised)
+            except tomllib.TOMLDecodeError:
+                pass
+        raise exc
+
+
+def _normalise_windows_paths(text: str) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        prefix, value = match.groups()
+        if "\\" not in value:
+            return match.group(0)
+        return f'{prefix}"{value.replace("\\", "/")}"'
+
+    return _WINDOWS_PATH_PATTERN.sub(_replace, text)
 
 
 __all__ = [
