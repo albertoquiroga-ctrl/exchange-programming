@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set
 
+import pandas as pd
+
 from . import alerts, collector, db
 from .alerts import ChangeDetector, TelegramClient
 from .config import Config
@@ -95,6 +97,12 @@ class DashboardSession:
             highlights=self.alert_metrics,
             selection_info=self._selection_summary(),
         )
+
+        history_report = build_aqhi_history_report(
+            self.conn, self.config.app.aqhi_station
+        )
+        if history_report:
+            print("\n" + history_report)
         if skip_wait:
             return
 
@@ -289,6 +297,51 @@ def _print_snapshot(
         header = f"{prefix}{title}{suffix}"
         output_lines.append(f"{header}\n{'-' * len(title)}\n{body}")
     print(separator.join(output_lines))
+
+
+def build_aqhi_history_report(
+    conn: sqlite3.Connection, station: str, limit: int = 8
+) -> Optional[str]:
+    """Return a pandas-powered AQHI history table for the selected station."""
+
+    if not station:
+        return None
+
+    query = """
+        SELECT station, category, value, updated_at
+        FROM aqhi
+        WHERE station = ?
+        ORDER BY datetime(updated_at) DESC
+        LIMIT ?
+    """
+    df = pd.read_sql_query(
+        query,
+        conn,
+        params=(station, limit),
+        parse_dates=["updated_at"],
+    )
+
+    if df.empty:
+        return None
+
+    df["updated_at"] = pd.to_datetime(df["updated_at"])
+    printable = (
+        df.copy()
+        .assign(updated_at=df["updated_at"].dt.strftime("%Y-%m-%d %H:%M"))
+        .rename(columns={"updated_at": "Timestamp", "value": "AQHI", "category": "Category"})
+        [["Timestamp", "AQHI", "Category"]]
+    )
+
+    stats = df["value"].agg(["min", "max", "mean"])
+    change = df.iloc[0]["value"] - df.iloc[-1]["value"] if len(df) > 1 else 0.0
+    stats_line = (
+        f"Range {stats['min']:.1f}–{stats['max']:.1f}, "
+        f"mean {stats['mean']:.1f}, latest change {change:+.1f}"
+    )
+
+    header = f"AQHI history for {station} (last {len(df)} readings)"
+    table_text = printable.to_string(index=False, float_format=lambda v: f"{v:0.1f}")
+    return f"{header}\n{table_text}\n{stats_line}"
 
 
 if __name__ == "__main__":
