@@ -163,6 +163,11 @@ def get_latest(conn: sqlite3.Connection) -> Dict[str, Optional[sqlite3.Row]]:
     }
 
 
+def get_latest_snapshot(conn: sqlite3.Connection) -> Dict[str, Optional[sqlite3.Row]]:
+    """Backward compatible alias used by older modules/tests."""
+    return get_latest(conn)
+
+
 def _fetch_latest_row(conn: sqlite3.Connection, table: str) -> Optional[sqlite3.Row]:
     """Return the newest row for the requested table, if any."""
     cur = conn.execute(f"SELECT * FROM {table} ORDER BY id DESC LIMIT 1")
@@ -195,14 +200,8 @@ __all__ = [
     "save_rain",
     "save_aqhi",
     "save_traffic",
+    "get_latest",
     "get_latest_snapshot",
-    "get_latest_warning",
-    "get_latest_rain",
-    "get_latest_aqhi",
-    "get_latest_traffic",
-    "get_last_two_warnings",
-    "get_last_two_rain",
-    "get_last_two_aqhi",
-    "get_last_two_traffic",
+    "get_last_two",
     "connect",
 ]

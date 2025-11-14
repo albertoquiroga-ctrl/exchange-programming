@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Protocol, TextIO
+from typing import Callable, Dict, Optional, Protocol, TextIO
 import logging
 import sqlite3
 import sys
@@ -62,6 +62,12 @@ class ChangeDetector:
     ):
         self.conn = conn
         self.messenger = messenger or ConsoleMessenger()
+        self.table_config: Dict[str, Callable[[sqlite3.Row], AlertMessage]] = {
+            "warnings": self._format_warning,
+            "rain": self._format_rain,
+            "aqhi": self._format_aqhi,
+            "traffic": self._format_traffic,
+        }
 
     def run(self) -> None:
         """Compare the newest and previous rows per table and send alerts."""
@@ -115,6 +121,8 @@ class ChangeDetector:
             current=row["severity"],
             description=row["description"],
         )
+
+
 def _extract_category(row: sqlite3.Row) -> str:
     """Return a string that represents the severity/category for the row."""
 
