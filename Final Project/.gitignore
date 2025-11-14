@@ -1,0 +1,6 @@
+# Local state
+*.db
+__pycache__/
+
+# Proof artifacts are stored locally only (binary files not tracked)
+docs/assets/*.png

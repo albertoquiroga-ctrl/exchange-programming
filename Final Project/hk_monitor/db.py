@@ -124,7 +124,7 @@ def save_traffic(conn: sqlite3.Connection, record: TrafficRecord) -> None:
 
 def _fetch_latest_two(conn: sqlite3.Connection, table: str) -> List[sqlite3.Row]:
     cur = conn.execute(
-        f"SELECT * FROM {table} ORDER BY datetime(updated_at) DESC LIMIT 2"
+        f"SELECT * FROM {table} ORDER BY id DESC LIMIT 2"
     )
     return list(cur.fetchall())
 
@@ -139,7 +139,7 @@ def get_latest(conn: sqlite3.Connection) -> Dict[str, Optional[sqlite3.Row]]:
 
 
 def _fetch_latest_row(conn: sqlite3.Connection, table: str) -> Optional[sqlite3.Row]:
-    cur = conn.execute(f"SELECT * FROM {table} ORDER BY datetime(updated_at) DESC LIMIT 1")
+    cur = conn.execute(f"SELECT * FROM {table} ORDER BY id DESC LIMIT 1")
     return cur.fetchone()
 
 
