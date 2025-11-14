@@ -1,0 +1,25 @@
+[app]
+database_path = "./final_project.db"
+poll_interval = 300
+rain_district = "Central & Western"
+aqhi_station = "Central/Western"
+traffic_region = "Hong Kong Island"
+use_mock_data = true
+
+[telegram]
+bot_token = ""
+chat_id = ""
+
+test_mode = true
+
+[api]
+warnings_url = "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=warnsum&lang=en"
+rainfall_url = "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=en"
+aqhi_url = "https://data.weather.gov.hk/aq/data/aqhi.json"
+traffic_url = "https://resource.data.one.gov.hk/td/routesandregions/trafficnews_en.json"
+
+[mocks]
+warnings = "tests/data/warnings.json"
+rainfall = "tests/data/rainfall.json"
+aqhi = "tests/data/aqhi.json"
+traffic = "tests/data/traffic.json"
