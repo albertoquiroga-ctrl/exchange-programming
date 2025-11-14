@@ -14,10 +14,9 @@ import logging
 import sqlite3
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Set
-
-import pandas as pd
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 try:
     from . import alerts, collector, db
@@ -77,14 +76,11 @@ def main() -> None:
         dashboard.run(skip_initial_refresh=args.collect)
 
 
-class DashboardSession:
-    """Interactive console dashboard with live refresh and selections."""
+class MenuController:
+    """Handle user selections for the dashboard menu."""
 
-    def __init__(self, config: Config, conn: sqlite3.Connection, enable_alerts: bool):
+    def __init__(self, config: Config):
         self.config = config
-        self.conn = conn
-        self.enable_alerts = enable_alerts
-        self.alert_metrics: Set[str] = set()
         self._options = _load_menu_options(config)
 
     def run(self, skip_initial_refresh: bool = False) -> None:
@@ -136,8 +132,9 @@ class DashboardSession:
             selection_info=self._selection_summary(),
         )
 
-        history_report = build_aqhi_history_report(
-            self.conn, self.config.app.aqhi_station
+    def prompt(self) -> bool:
+        menu_text = (
+            "Press Enter to refresh now, or choose: [d]istrict, [a]qhi, [t]raffic, [q]uit"
         )
         if history_report:
             # Step 5: display the pandas table so viewers see recent AQHI trends
@@ -161,7 +158,7 @@ class DashboardSession:
         menu = "Press Enter to refresh now, or choose: [d]istrict, [a]qhi, [t]raffic, [q]uit"
         while True:
             try:
-                choice = input(f"{menu}\n> ").strip().lower()
+                choice = input(f"{menu_text}\n> ").strip().lower()
             except EOFError:
                 return False
             if choice in ("", "r"):
@@ -169,33 +166,24 @@ class DashboardSession:
             if choice == "q":
                 return False
             if choice == "d":
-                self._change_selection(
-                    "rain", "rain district", self._options.get("rain"), "rain_district"
-                )
+                self._change_selection("rain", "rain district", "rain_district")
                 continue
             if choice == "a":
-                self._change_selection(
-                    "aqhi", "AQHI station", self._options.get("aqhi"), "aqhi_station"
-                )
+                self._change_selection("aqhi", "AQHI station", "aqhi_station")
                 continue
             if choice == "t":
-                self._change_selection(
-                    "traffic",
-                    "traffic region",
-                    self._options.get("traffic"),
-                    "traffic_region",
-                )
+                self._change_selection("traffic", "traffic region", "traffic_region")
                 continue
             # Any other keystrokes are invalid; loop to prompt the user again.
             print("Unknown command. Please choose one of the listed options.")
 
     def _change_selection(
         self,
-        key: str,
+        option_key: str,
         label: str,
-        options: Optional[Sequence[str]],
         attribute: str,
     ) -> None:
+        options = self._options.get(option_key)
         current_value = getattr(self.config.app, attribute)
         print(f"Current {label}: {current_value}")
         if options:
@@ -211,8 +199,9 @@ class DashboardSession:
                 print("Invalid selection, keeping current value.")
                 return
             if 0 <= index < len(options):
-                setattr(self.config.app, attribute, options[index])
-                print(f"Updated {label} to {options[index]}.")
+                new_value = options[index]
+                setattr(self.config.app, attribute, new_value)
+                print(f"Updated {label} to {new_value}.")
             else:
                 print("Selection out of range, keeping current value.")
         else:
@@ -224,9 +213,98 @@ class DashboardSession:
                 print(f"Updated {label} to {manual}.")
 
     @staticmethod
-    def _print_options(options: Sequence[str]) -> None:
-        for idx, value in enumerate(options, start=1):
-            print(f"  {idx}. {value}")
+    def _show_menu_options(options: Sequence[str]) -> None:
+        index = 1
+        for value in options:
+            print(f"  {index}. {value}")
+            index += 1
+
+
+class SnapshotPrinter:
+    """Format and print the latest snapshot to the console."""
+
+    def display(
+        self,
+        snapshot: Dict[str, Optional[sqlite3.Row]],
+        highlights: Set[str],
+        selection_info: Optional[str],
+    ) -> None:
+        sections = []
+        sections.append(("Warnings", self._format_warning(snapshot.get("warnings"))))
+        sections.append(("Rain", self._format_rain(snapshot.get("rain"))))
+        sections.append(("AQHI", self._format_aqhi(snapshot.get("aqhi"))))
+        sections.append(("Traffic", self._format_traffic(snapshot.get("traffic"))))
+
+        separator = "\n" + "=" * 60 + "\n"
+        output_lines: List[str] = []
+        if selection_info:
+            output_lines.append(selection_info)
+        for title, body in sections:
+            prefix = ""
+            suffix = ""
+            if title in highlights:
+                prefix = "*** "
+                suffix = " ***"
+            header = f"{prefix}{title}{suffix}"
+            underline = "-" * len(title)
+            section_text = f"{header}\n{underline}\n{body}"
+            output_lines.append(section_text)
+        print(separator.join(output_lines))
+
+    @staticmethod
+    def _format_warning(row: Optional[sqlite3.Row]) -> str:
+        if not row:
+            return "No warning data."
+        return (
+            f"Level: {row['level']}\n"
+            f"Message: {row['message']}\n"
+            f"Updated: {row['updated_at']}"
+        )
+
+    @staticmethod
+    def _format_rain(row: Optional[sqlite3.Row]) -> str:
+        if not row:
+            return "No rain data."
+        return (
+            f"District: {row['district']}\n"
+            f"Intensity: {row['intensity']}\n"
+            f"Updated: {row['updated_at']}"
+        )
+
+    @staticmethod
+    def _format_aqhi(row: Optional[sqlite3.Row]) -> str:
+        if not row:
+            return "No AQHI data."
+        value = row["value"]
+        value_text = f"{value:.1f}"
+        return (
+            f"Station: {row['station']}\n"
+            f"Category: {row['category']}\n"
+            f"Value: {value_text}\n"
+            f"Updated: {row['updated_at']}"
+        )
+
+    @staticmethod
+    def _format_traffic(row: Optional[sqlite3.Row]) -> str:
+        if not row:
+            return "No traffic data."
+        return (
+            f"Severity: {row['severity']}\n"
+            f"{row['description']}\n"
+            f"Updated: {row['updated_at']}"
+        )
+
+
+class HistoryReporter:
+    """Generate AQHI history tables for the selected station."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+
+    def print_report(self, station: str) -> None:
+        report = build_aqhi_history_report(self.conn, station)
+        if report:
+            print("\n" + report)
 
 
 class _RecordingMessenger(ConsoleMessenger):
@@ -259,11 +337,26 @@ def _extract_places(path: Path) -> List[str]:
             payload = json.load(fh)
     except OSError:
         return []
+    data_entries: List[Dict[str, Any]] = []
     if "rainfall" in payload:
-        data = payload.get("rainfall", {}).get("data", [])
+        rainfall_section = payload.get("rainfall")
+        if isinstance(rainfall_section, dict):
+            raw_entries = rainfall_section.get("data")
+        else:
+            raw_entries = []
     else:
-        data = payload.get("data", [])
-    return sorted({str(item.get("place")) for item in data if item.get("place")})
+        raw_entries = payload.get("data")
+    if isinstance(raw_entries, list):
+        for item in raw_entries:
+            if isinstance(item, dict):
+                data_entries.append(item)
+    places: Set[str] = set()
+    for item in data_entries:
+        place = item.get("place")
+        if place:
+            places.add(str(place))
+    place_list = sorted(list(places))
+    return place_list
 
 
 def _extract_aqhi_stations(path: Path) -> List[str]:
@@ -273,11 +366,29 @@ def _extract_aqhi_stations(path: Path) -> List[str]:
             payload = json.load(fh)
     except OSError:
         return []
+    stations: List[Dict[str, Any]] = []
     if isinstance(payload, list):
-        stations = payload
+        for entry in payload:
+            if isinstance(entry, dict):
+                stations.append(entry)
     else:
-        stations = payload.get("aqhi") or payload.get("data") or []
-    return sorted({str(item.get("station")) for item in stations if item.get("station")})
+        if "aqhi" in payload:
+            raw_stations = payload.get("aqhi")
+        elif "data" in payload:
+            raw_stations = payload.get("data")
+        else:
+            raw_stations = []
+        if isinstance(raw_stations, list):
+            for entry in raw_stations:
+                if isinstance(entry, dict):
+                    stations.append(entry)
+    station_names: Set[str] = set()
+    for entry in stations:
+        station_value = entry.get("station")
+        if station_value:
+            station_names.add(str(station_value))
+    sorted_names = sorted(list(station_names))
+    return sorted_names
 
 
 def _extract_regions(path: Path) -> List[str]:
@@ -287,11 +398,23 @@ def _extract_regions(path: Path) -> List[str]:
             payload = json.load(fh)
     except OSError:
         return []
+    incidents: List[Dict[str, Any]] = []
     if isinstance(payload, list):
-        incidents = payload
+        for entry in payload:
+            if isinstance(entry, dict):
+                incidents.append(entry)
     else:
-        incidents = payload.get("trafficnews") or payload.get("incidents") or []
-    regions = set()
+        if "trafficnews" in payload:
+            raw_incidents = payload.get("trafficnews")
+        elif "incidents" in payload:
+            raw_incidents = payload.get("incidents")
+        else:
+            raw_incidents = []
+        if isinstance(raw_incidents, list):
+            for entry in raw_incidents:
+                if isinstance(entry, dict):
+                    incidents.append(entry)
+    region_names: Set[str] = set()
     for entry in incidents:
         region = entry.get("region") or entry.get("area")
         if region:
@@ -356,7 +479,7 @@ def _print_snapshot(
 def build_aqhi_history_report(
     conn: sqlite3.Connection, station: str, limit: int = 8
 ) -> Optional[str]:
-    """Return a pandas-powered AQHI history table for the selected station."""
+    """Return a textual AQHI history table for the selected station."""
 
     if not station:
         return None
@@ -370,14 +493,9 @@ def build_aqhi_history_report(
         ORDER BY datetime(updated_at) DESC
         LIMIT ?
     """
-    df = pd.read_sql_query(
-        query,
-        conn,
-        params=(station, limit),
-        parse_dates=["updated_at"],
-    )
-
-    if df.empty:
+    cursor = conn.execute(query, (station, limit))
+    rows = cursor.fetchall()
+    if not rows:
         return None
 
     # Step 2: normalize timestamps to pandas ``datetime64`` so we can format
@@ -394,13 +512,24 @@ def build_aqhi_history_report(
     stats = df["value"].agg(["min", "max", "mean"])
     change = df.iloc[0]["value"] - df.iloc[-1]["value"] if len(df) > 1 else 0.0
     stats_line = (
-        f"Range {stats['min']:.1f}–{stats['max']:.1f}, "
-        f"mean {stats['mean']:.1f}, latest change {change:+.1f}"
+        f"Range {min_value:.1f}–{max_value:.1f}, "
+        f"mean {mean_value:.1f}, latest change {latest_change:+.1f}"
     )
-
-    header = f"AQHI history for {station} (last {len(df)} readings)"
-    table_text = printable.to_string(index=False, float_format=lambda v: f"{v:0.1f}")
+    table_text = "\n".join(table_lines)
     return f"{header}\n{table_text}\n{stats_line}"
+
+
+def _format_timestamp(timestamp: str) -> str:
+    """Normalize timestamps stored via db.ISO_FORMAT into readable text."""
+
+    try:
+        dt = datetime.strptime(timestamp, db.ISO_FORMAT)
+    except ValueError:
+        try:
+            dt = datetime.fromisoformat(timestamp)
+        except ValueError:
+            return timestamp
+    return dt.strftime("%Y-%m-%d %H:%M")
 
 
 if __name__ == "__main__":

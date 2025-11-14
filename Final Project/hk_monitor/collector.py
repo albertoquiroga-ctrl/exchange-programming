@@ -41,12 +41,12 @@ def collect_once(
         # immediately persist the fetched snapshot.
         with connect(config.app.database_path) as connection:
             _collect(config, connection)
-            return db.get_latest(connection)
+            return db.get_latest_snapshot(connection)
     else:
         # Step 2b: reuse the provided connection to keep the surrounding
         # transaction scope intact.
         _collect(config, conn)
-        return db.get_latest(conn)
+        return db.get_latest_snapshot(conn)
 
 
 def _collect(config: Config, conn: sqlite3.Connection) -> None:
@@ -55,21 +55,23 @@ def _collect(config: Config, conn: sqlite3.Connection) -> None:
     # Step 3: pull the weather warning feed first so dashboard users see the
     # high-severity alerts immediately.
     warning_record = fetch_warning(config)
-    if warning_record:
+    if warning_record is not None:
         db.save_warning(conn, warning_record)
 
     # Step 4: hydrate rain, AQHI, then traffic data; every helper returns a
     # domain record or ``None`` so empty feeds simply skip persistence.
     rain_record = fetch_rain(config)
-    if rain_record:
+    if rain_record is not None:
         db.save_rain(conn, rain_record)
 
+    # AQHI: load -> filter -> normalize -> persist
     aqhi_record = fetch_aqhi(config)
-    if aqhi_record:
+    if aqhi_record is not None:
         db.save_aqhi(conn, aqhi_record)
 
+    # Traffic: load -> filter -> normalize -> persist
     traffic_record = fetch_traffic(config)
-    if traffic_record:
+    if traffic_record is not None:
         db.save_traffic(conn, traffic_record)
 
 
@@ -93,9 +95,9 @@ def fetch_warning(config: Config) -> db.WarningRecord | None:
         chosen.get("updateTime") or data.get("updateTime")
     )
     return db.WarningRecord(
-        level=chosen.get("warningStatementCode", "UNKNOWN"),
-        message=chosen.get("warningMessage", "No warning message supplied."),
-        updated_at=timestamp,
+        level=str(level),
+        message=str(message),
+        updated_at=_parse_time(str(update_time) if update_time else None),
     )
 
 
@@ -125,9 +127,9 @@ def fetch_rain(config: Config) -> db.RainRecord | None:
     # float here keeps comparison logic deterministic.
     value = float(district_entry.get("max", district_entry.get("value", 0)) or 0)
     return db.RainRecord(
-        district=config.app.rain_district,
-        intensity=_categorize_rain(value),
-        updated_at=_parse_time(district_entry.get("recordTime") or data.get("updateTime")),
+        district=district,
+        intensity=intensity,
+        updated_at=_parse_time(str(record_time) if record_time else None),
     )
 
 
@@ -164,10 +166,10 @@ def fetch_aqhi(config: Config) -> db.AqhiRecord | None:
         # when the per-station payload omits it.
         dataset_time = data.get("publishDate") or data.get("updateTime")
     return db.AqhiRecord(
-        station=config.app.aqhi_station,
+        station=station,
         category=str(category),
         value=value,
-        updated_at=_parse_time(publish_time or dataset_time),
+        updated_at=_parse_time(str(timestamp_source) if timestamp_source else None),
     )
 
 
@@ -183,12 +185,6 @@ def fetch_traffic(config: Config) -> db.TrafficRecord | None:
         key="trafficnews",
         parser=_parse_traffic_xml,
     )
-    if isinstance(data, list):
-        incidents = data
-    else:
-        incidents = data.get("trafficnews") or data.get("incidents") or []
-    if not incidents:
-        return None
 
     target = config.app.traffic_region.strip().lower()
 
@@ -210,18 +206,76 @@ def fetch_traffic(config: Config) -> db.TrafficRecord | None:
         ).lower()
         return target in haystack
 
-    entry = next((row for row in incidents if _matches(row)), None) or incidents[0]
-    severity = entry.get("severity", entry.get("category", "info"))
-    description = entry.get("content") or entry.get("summary") or "Traffic update"
+def extract_traffic_entries(payload: Any) -> list[Dict[str, Any]]:
+    incidents: list[Dict[str, Any]] = []
+    if isinstance(payload, list):
+        for entry in payload:
+            if isinstance(entry, dict):
+                incidents.append(entry)
+    elif isinstance(payload, dict):
+        if "trafficnews" in payload:
+            raw_incidents = payload.get("trafficnews")
+        elif "incidents" in payload:
+            raw_incidents = payload.get("incidents")
+        else:
+            raw_incidents = []
+        if isinstance(raw_incidents, list):
+            for entry in raw_incidents:
+                if isinstance(entry, dict):
+                    incidents.append(entry)
+    return incidents
+
+
+def select_traffic_entry(
+    incidents: list[Dict[str, Any]], target_region: str
+) -> Dict[str, Any] | None:
+    if not incidents:
+        return None
+    search_text = target_region.strip().lower()
+    if not search_text:
+        return incidents[0]
+    for entry in incidents:
+        words: list[str] = []
+        region_text = entry.get("region")
+        if region_text:
+            words.append(str(region_text))
+        location_text = entry.get("location")
+        if location_text:
+            words.append(str(location_text))
+        direction_text = entry.get("direction")
+        if direction_text:
+            words.append(str(direction_text))
+        content_text = entry.get("content")
+        if content_text:
+            words.append(str(content_text))
+        haystack = " ".join(words).lower()
+        if search_text in haystack:
+            return entry
+    return incidents[0]
+
+
+def normalize_traffic_entry(
+    entry: Dict[str, Any], payload: Any
+) -> db.TrafficRecord:
+    severity = entry.get("severity")
+    if not severity:
+        severity = entry.get("category")
+    if not severity:
+        severity = "info"
+    description = entry.get("content")
+    if not description:
+        description = entry.get("summary")
+    if not description:
+        description = "Traffic update"
     updated = entry.get("update_time")
     if not updated and isinstance(data, dict):
         # Reuse the feed-level timestamp when individual items omit update_time
         # so the dashboard always shows when data was last refreshed.
         updated = data.get("updateTime")
     return db.TrafficRecord(
-        severity=severity.title(),
-        description=description.strip(),
-        updated_at=_parse_time(updated),
+        severity=str(severity).title(),
+        description=normalized_description,
+        updated_at=_parse_time(str(updated) if updated else None),
     )
 
 
@@ -387,7 +441,11 @@ def _parse_traffic_xml(text: str) -> Dict[str, Any]:
     root = ET.fromstring(text)
     incidents = []
     for message in root.findall(".//message"):
-        payload = {child.tag.lower(): (child.text or "").strip() for child in message}
+        payload: Dict[str, Any] = {}
+        for child in message:
+            key = child.tag.lower()
+            value = child.text or ""
+            payload[key] = value.strip()
         region = (
             payload.get("district_en")
             or payload.get("direction_en")

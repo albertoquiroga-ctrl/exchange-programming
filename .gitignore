@@ -1,3 +1,6 @@
 # Ignore decoded slide artifacts recreated from Base64 placeholders
 Final Project/docs/slides/HK-Conditions-Monitor.pptx
 Final Project/docs/slides/hk-architecture.png
+
+# Ignore generated payload caches written during tests/demo runs
+**/last_*.json

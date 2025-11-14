@@ -150,7 +150,8 @@ def _normalise_windows_paths(text: str) -> str:
         prefix, value = match.groups()
         if "\\" not in value:
             return match.group(0)
-        return f'{prefix}"{value.replace("\\", "/")}"'
+        cleaned_value = value.replace("\\", "/")
+        return f'{prefix}"{cleaned_value}"'
 
     return _WINDOWS_PATH_PATTERN.sub(_replace, text)
 
