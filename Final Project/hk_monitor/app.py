@@ -7,10 +7,9 @@ import logging
 import sqlite3
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set
-
-import pandas as pd
 
 try:
     from . import alerts, collector, db
@@ -428,7 +427,7 @@ def _extract_regions(path: Path) -> List[str]:
 def build_aqhi_history_report(
     conn: sqlite3.Connection, station: str, limit: int = 8
 ) -> Optional[str]:
-    """Return a pandas-powered AQHI history table for the selected station."""
+    """Return a textual AQHI history table for the selected station."""
 
     if not station:
         return None
@@ -440,36 +439,66 @@ def build_aqhi_history_report(
         ORDER BY datetime(updated_at) DESC
         LIMIT ?
     """
-    dataframe = pd.read_sql_query(
-        query,
-        conn,
-        params=(station, limit),
-        parse_dates=["updated_at"],
-    )
-
-    if dataframe.empty:
+    cursor = conn.execute(query, (station, limit))
+    rows = cursor.fetchall()
+    if not rows:
         return None
 
-    dataframe["updated_at"] = pd.to_datetime(dataframe["updated_at"])
-    printable_df = dataframe.copy()
-    printable_df["updated_at"] = printable_df["updated_at"].dt.strftime("%Y-%m-%d %H:%M")
-    printable_df = printable_df.rename(
-        columns={"updated_at": "Timestamp", "value": "AQHI", "category": "Category"}
-    )
-    printable_df = printable_df[["Timestamp", "AQHI", "Category"]]
+    formatted_rows: List[tuple[str, float, str]] = []
+    values: List[float] = []
+    for row in rows:
+        value_raw = row["value"] if "value" in row.keys() else row[2]
+        try:
+            value = float(value_raw)
+        except (TypeError, ValueError):
+            value = 0.0
+        values.append(value)
 
-    stats = dataframe["value"].agg(["min", "max", "mean"])
+        updated_at_raw = row["updated_at"] if "updated_at" in row.keys() else row[3]
+        timestamp_text = _format_timestamp(str(updated_at_raw))
+        category = row["category"] if "category" in row.keys() else row[1]
+        formatted_rows.append((timestamp_text, value, str(category)))
+
+    min_value = values[0]
+    max_value = values[0]
+    total = 0.0
+    for value in values:
+        if value < min_value:
+            min_value = value
+        if value > max_value:
+            max_value = value
+        total += value
+    mean_value = total / len(values)
     latest_change = 0.0
-    if len(dataframe) > 1:
-        latest_change = dataframe.iloc[0]["value"] - dataframe.iloc[-1]["value"]
-    stats_line = (
-        f"Range {stats['min']:.1f}–{stats['max']:.1f}, "
-        f"mean {stats['mean']:.1f}, latest change {latest_change:+.1f}"
-    )
+    if len(values) > 1:
+        latest_change = values[0] - values[-1]
 
-    header = f"AQHI history for {station} (last {len(dataframe)} readings)"
-    table_text = printable_df.to_string(index=False, float_format=lambda v: f"{v:0.1f}")
+    header = f"AQHI history for {station} (last {len(rows)} readings)"
+    table_lines = ["Timestamp            AQHI Category"]
+    for timestamp_text, value, category in formatted_rows:
+        aqhi_text = f"{value:0.1f}".rjust(4)
+        timestamp_column = timestamp_text.ljust(20)
+        line = f"{timestamp_column}{aqhi_text} {category}"
+        table_lines.append(line)
+    stats_line = (
+        f"Range {min_value:.1f}–{max_value:.1f}, "
+        f"mean {mean_value:.1f}, latest change {latest_change:+.1f}"
+    )
+    table_text = "\n".join(table_lines)
     return f"{header}\n{table_text}\n{stats_line}"
+
+
+def _format_timestamp(timestamp: str) -> str:
+    """Normalize timestamps stored via db.ISO_FORMAT into readable text."""
+
+    try:
+        dt = datetime.strptime(timestamp, db.ISO_FORMAT)
+    except ValueError:
+        try:
+            dt = datetime.fromisoformat(timestamp)
+        except ValueError:
+            return timestamp
+    return dt.strftime("%Y-%m-%d %H:%M")
 
 
 if __name__ == "__main__":
