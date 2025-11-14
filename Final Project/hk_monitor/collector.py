@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 import sqlite3
 
 import requests
@@ -13,6 +14,8 @@ from . import db
 from .config import Config
 
 ISO_VARIANTS = ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ")
+LOGGER = logging.getLogger(__name__)
+MAX_ATTEMPTS = 3
 
 
 def collect_once(
@@ -172,14 +175,13 @@ def _parse_time(raw: str | None) -> datetime:
 
 def _get_payload(
     config: Config, url: str, mock_path: Path, key: str | None = None
-) -> Dict[str, Any]:
+) -> Any:
+    cache_path = _cache_path(mock_path, key)
     if config.app.use_mock_data:
-        with mock_path.open("r", encoding="utf-8") as fh:
-            payload = json.load(fh)
+        payload = _load_from_disk(mock_path)
+        _persist_cache(cache_path, payload)
     else:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        payload = response.json()
+        payload = _fetch_live_payload(url, cache_path)
     if key and isinstance(payload, dict):
         if key in payload:
             return payload[key]
@@ -187,6 +189,63 @@ def _get_payload(
         if isinstance(nested, dict) and key in nested:
             return nested[key]
     return payload
+
+
+def _fetch_live_payload(url: str, cache_path: Path) -> Any:
+    last_error: Exception | None = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            payload = response.json()
+            _persist_cache(cache_path, payload)
+            return payload
+        except (requests.RequestException, ValueError) as exc:
+            last_error = exc
+            LOGGER.warning(
+                "Attempt %s/%s to fetch %s failed: %s",
+                attempt,
+                MAX_ATTEMPTS,
+                url,
+                exc,
+            )
+    cached = _load_cached_payload(cache_path)
+    if cached is not None:
+        LOGGER.info("Using cached payload from %s for %s", cache_path, url)
+        return cached
+    if last_error:
+        raise last_error
+    raise RuntimeError(f"Unable to fetch payload from {url}")
+
+
+def _cache_path(mock_path: Path, key: str | None) -> Path:
+    identifier = (key or mock_path.stem or "payload").strip() or "payload"
+    safe = "".join(c if c.isalnum() or c in {"-", "_"} else "_" for c in identifier)
+    return mock_path.parent / f"last_{safe}.json"
+
+
+def _persist_cache(path: Path, payload: Any) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+    except OSError as exc:  # pragma: no cover - cache failures are non-fatal
+        LOGGER.debug("Unable to persist payload cache %s: %s", path, exc)
+
+
+def _load_cached_payload(path: Path) -> Any | None:
+    try:
+        return _load_from_disk(path)
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError as exc:
+        LOGGER.warning("Cached payload at %s is invalid: %s", path, exc)
+        return None
+
+
+def _load_from_disk(path: Path) -> Any:
+    with path.open("r", encoding="utf-8") as fh:
+        return json.load(fh)
 
 
 __all__ = [
