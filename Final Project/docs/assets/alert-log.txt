@@ -1,0 +1,2 @@
+2025-11-14 14:57:07,751 [INFO] hk_monitor.alerts - [DRY RUN] [WARNINGS] TC8 -> RED
+Red rainstorm warning upgraded.
