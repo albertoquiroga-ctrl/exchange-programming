@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Set
 import os
 import re
 
@@ -54,10 +54,11 @@ class Config:
                 the current working directory.
         """
 
-        config_path = Path(path or "config.toml")
+        requested_path = Path(path or "config.toml")
+        config_path = _resolve_config_path(requested_path)
         if not config_path.exists():
             raise FileNotFoundError(
-                f"Configuration file '{config_path}' was not found. "
+                f"Configuration file '{requested_path}' was not found. "
                 "Copy config.template.toml to config.toml and adjust the values."
             )
 
@@ -152,6 +153,33 @@ def _normalise_windows_paths(text: str) -> str:
         return f'{prefix}"{value.replace("\\", "/")}"'
 
     return _WINDOWS_PATH_PATTERN.sub(_replace, text)
+
+
+def _resolve_config_path(path: Path) -> Path:
+    """Return the first existing config path when searching common locations."""
+    candidates: List[Path] = []
+    if path.is_absolute():
+        candidates.append(path)
+    else:
+        cwd = Path.cwd()
+        module_dir = Path(__file__).resolve().parent
+        search_roots = [cwd, module_dir, module_dir.parent]
+        # Include additional parents of the module directory for robustness.
+        search_roots.extend(module_dir.parents[1:])
+        seen: Set[Path] = set()
+        for root in search_roots:
+            candidate = (root / path).resolve()
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            candidates.append(candidate)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    # Fall back to the first candidate so callers can surface a sensible error.
+    return candidates[0] if candidates else path
 
 
 __all__ = [
