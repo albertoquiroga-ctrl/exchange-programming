@@ -23,7 +23,9 @@ from .config import Config
 
 LOGGER = logging.getLogger(__name__)
 ISO_VARIANTS = ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ")
+# A handful of retries keep student demos resilient to flaky HK APIs.
 MAX_ATTEMPTS = 3
+# Sending a descriptive UA helps data.gov.hk trace demo traffic if needed.
 HTTP_HEADERS = {"User-Agent": "HKConditionsMonitor/1.0 (+https://data.gov.hk)"}
 
 
@@ -37,6 +39,8 @@ def collect_once(
         # mirrors ``hk_monitor.app``.
         from .db import connect
 
+        # Treat the `collect_once` helper as a one-shot pipeline: open a
+        # connection, scrape data, and immediately return a fresh snapshot.
         with connect(config.app.database_path) as connection:
             _collect(config, connection)
             return db.get_latest_snapshot(connection)
@@ -47,6 +51,8 @@ def collect_once(
 def _collect(config: Config, conn: sqlite3.Connection) -> None:
     """Run each feed collector in turn, writing rows when data is present."""
 
+    # Capture and persist each metric independently so one flaky endpoint does
+    # not block the remaining feeds.
     warning_record = fetch_warning(config)
     if warning_record is not None:
         db.save_warning(conn, warning_record)
@@ -70,13 +76,22 @@ def fetch_warning(config: Config) -> db.WarningRecord | None:
     payload = _get_payload(
         config, config.api.warnings_url, config.mocks.warnings, key=None
     )
+    feed_timestamp = None
+    if isinstance(payload, dict):
+        feed_timestamp = payload.get("updateTime") or payload.get("issueTime")
     details: Sequence[Dict[str, Any]] = []
     if isinstance(payload, dict):
         raw = payload.get("details") or payload.get("warning") or payload.get("data")
         if isinstance(raw, list):
             details = [entry for entry in raw if isinstance(entry, dict)]
     if not details:
-        return None
+        return db.WarningRecord(
+            level="None",
+            message="No weather warnings in force.",
+            updated_at=_parse_time(str(feed_timestamp) if feed_timestamp else None),
+        )
+    # The feed lists warnings in reverse chronological order, so take the first
+    # structured entry and normalise keys coming from different HK APIs.
     entry = details[0]
     level = (
         entry.get("warningStatementCode")
@@ -121,8 +136,20 @@ def fetch_rain(config: Config) -> db.RainRecord | None:
             entries = [row for row in data if isinstance(row, dict)]
     elif isinstance(payload, list):
         entries = [row for row in payload if isinstance(row, dict)]
+    # Each dashboard instance monitors a single district, so pick the configured
+    # reading instead of averaging the whole array.
     district = config.app.rain_district
     entry = next((row for row in entries if row.get("place") == district), None)
+    if not entry:
+        target = _normalise_district(district)
+        entry = next(
+            (
+                row
+                for row in entries
+                if _normalise_district(row.get("place")) == target
+            ),
+            None,
+        )
     if not entry:
         return None
     raw_value = entry.get("max") or entry.get("value") or entry.get("mm") or 0
@@ -156,6 +183,7 @@ def fetch_aqhi(config: Config) -> db.AqhiRecord | None:
             stations = [row for row in raw if isinstance(row, dict)]
         else:
             stations = []
+    # Iterate through the payload to find the user-selected monitoring station.
     entry = next(
         (row for row in stations if row.get("station") == config.app.aqhi_station),
         None,
@@ -196,6 +224,7 @@ def fetch_traffic(config: Config) -> db.TrafficRecord | None:
         key=None,
         parser=_parse_traffic_xml,
     )
+    # Traffic payloads can describe many regions; narrow to the learner's focus.
     incidents = _extract_traffic_entries(payload)
     entry = _pick_traffic_entry(incidents, config.app.traffic_region)
     if not entry:
@@ -274,6 +303,18 @@ def _categorize_rain(value: float) -> str:
     return "Dry"
 
 
+def _normalise_district(name: Any) -> str:
+    """Normalise different spellings like 'Central & Western District'."""
+
+    if not isinstance(name, str):
+        return ""
+    text = name.strip().lower()
+    suffix = " district"
+    if text.endswith(suffix):
+        text = text[: -len(suffix)].strip()
+    return text
+
+
 def _categorize_aqhi(value: float) -> str:
     """Translate AQHI numbers into the textual bands used by HK authorities."""
     if value >= 10:
@@ -313,6 +354,8 @@ def _get_payload(
     """Return either the mock payload or the live HTTP response, caching both."""
 
     cache_path = _cache_path(mock_path, key)
+    # Development often happens offline, so allow toggling between the bundled
+    # mock files and live HTTP data with ``app.use_mock_data``.
     if config.app.use_mock_data:
         payload = _load_from_disk(mock_path)
         _persist_cache(cache_path, payload)
@@ -333,6 +376,7 @@ def _fetch_live_payload(
     """Hit the HTTP endpoint with retries and cache persistence."""
 
     last_error: Exception | None = None
+    # Simple retry loop keeps the classroom demo from failing on temporary 502s.
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             response = requests.get(url, timeout=10, headers=HTTP_HEADERS)
@@ -352,6 +396,7 @@ def _fetch_live_payload(
                 url,
                 exc,
             )
+    # Retries exhausted: reuse yesterday's payload instead of crashing.
     cached = _load_cached_payload(cache_path)
     if cached is not None:
         LOGGER.info("Using cached payload from %s for %s", cache_path, url)
@@ -365,6 +410,7 @@ def _cache_path(mock_path: Path, key: str | None) -> Path:
     """Build a filesystem-friendly cache filename derived from the payload."""
 
     identifier = (key or mock_path.stem or "payload").strip() or "payload"
+    # Replace spaces and punctuation so Windows/macOS share the same filenames.
     safe = "".join(c if c.isalnum() or c in {"-", "_"} else "_" for c in identifier)
     return mock_path.parent / f"last_{safe}.json"
 
@@ -407,6 +453,7 @@ def _parse_traffic_xml(text: str) -> Dict[str, Any]:
     for message in root.findall(".//message"):
         payload: Dict[str, Any] = {}
         for child in message:
+            # Lowercase tags to keep dictionary lookups consistent.
             key = child.tag.lower()
             value = (child.text or "").strip()
             payload[key] = value

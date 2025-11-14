@@ -7,6 +7,7 @@ from hk_monitor import alerts, collector, config, db
 
 
 class DummyMessenger:
+    """Minimal messenger that records alerts instead of printing to stdout."""
     def __init__(self) -> None:
         self.messages: list[alerts.AlertMessage] = []
 
@@ -22,10 +23,12 @@ def _load_template_config() -> config.Config:
 
 
 def _init_conn(tmp_path: Path):
+    """Create an isolated database for each scenario test."""
     return db.init_db(tmp_path / "scenario.db")
 
 
 def test_warning_upgrade_triggers_alert(tmp_path: Path) -> None:
+    # Switching mock payloads simulates the warning level escalating in HK.
     cfg = _load_template_config()
     conn = _init_conn(tmp_path)
 
@@ -47,6 +50,7 @@ def test_warning_upgrade_triggers_alert(tmp_path: Path) -> None:
 
 
 def test_aqhi_spike_is_detected(tmp_path: Path) -> None:
+    # Drive the AQHI collector twice so the change detector sees a big jump.
     cfg = _load_template_config()
     conn = _init_conn(tmp_path)
 
@@ -57,7 +61,7 @@ def test_aqhi_spike_is_detected(tmp_path: Path) -> None:
     assert first is not None
     db.save_aqhi(conn, first)
 
-    # simulate next value by taking the second reading manually
+    # Simulate the next value by taking the second reading manually.
     spike_payload = collector._get_payload(cfg, "", aqhi_path, key=None)
     cfg.mocks.aqhi = aqhi_path
     spike_entry = spike_payload[1]
@@ -78,6 +82,7 @@ def test_aqhi_spike_is_detected(tmp_path: Path) -> None:
 
 
 def test_traffic_incident_escalation(tmp_path: Path) -> None:
+    # Feed two incidents with different severity to exercise the Traffic branch.
     cfg = _load_template_config()
     conn = _init_conn(tmp_path)
 

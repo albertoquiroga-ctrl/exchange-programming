@@ -12,6 +12,7 @@ def decode_file(path: pathlib.Path, force: bool = False) -> pathlib.Path:
     if path.suffix != '.b64':
         raise ValueError(f"{path} is not a .b64 file")
     target = path.with_suffix('')
+    # Avoid overwriting the original asset unless callers explicitly opt-in.
     if target.exists() and not force:
         raise FileExistsError(f"Refusing to overwrite existing file: {target}")
     data = base64.b64decode(path.read_bytes())
@@ -38,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
 
     decoded: list[pathlib.Path] = []
     for root in args.roots:
+        # Support mixing directories and files so instructors can decode just
+        # one asset or the entire slides folder.
         if root.is_file():
             decoded.append(decode_file(root, force=args.force))
             continue
@@ -48,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     if not decoded:
         print("No .b64 files decoded", file=sys.stderr)
         return 1
+    # Mirror the output paths so students know where the binary artifacts live.
     for path in decoded:
         print(f"Decoded {path}")
     return 0

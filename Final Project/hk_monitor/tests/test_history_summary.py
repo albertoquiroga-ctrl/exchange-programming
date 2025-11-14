@@ -7,6 +7,7 @@ from hk_monitor.app import build_aqhi_history_report
 
 
 def _insert_aqhi(conn, station: str, start: datetime, values: list[float]) -> None:
+    """Populate the database with evenly spaced AQHI readings."""
     ts = start
     for value in values:
         db.save_aqhi(
@@ -28,6 +29,7 @@ def test_history_report_shows_stats_and_table(tmp_path):
 
     report = build_aqhi_history_report(conn, "Central", limit=5)
 
+    # The ASCII table should contain both headers and summary statistics.
     assert report is not None
     assert "AQHI history for Central" in report
     assert "Range 2.0–5.0" in report

@@ -12,6 +12,7 @@ from hk_monitor.config import Config
 
 
 def _load_config() -> Config:
+    # Reuse the provided template so tests run with realistic defaults.
     config_path = Path(__file__).resolve().parents[1] / "config.template.toml"
     return Config.load(config_path)
 
@@ -24,6 +25,7 @@ def test_fetch_warning_from_mock():
 
 
 def test_collect_once_persists(tmp_path):
+    # Smoke test that verifies every feed saves at least one row into SQLite.
     config = _load_config()
     config.app = replace(config.app, database_path=tmp_path / "test.db")
     with db.connect(config.app.database_path) as conn:
@@ -33,6 +35,7 @@ def test_collect_once_persists(tmp_path):
 
 
 def test_change_detector_emits_alert_on_category_change(tmp_path):
+    # Simulate a warning upgrade and ensure the messenger captures it.
     config = _load_config()
     config.app = replace(config.app, database_path=tmp_path / "test.db")
     with db.connect(config.app.database_path) as conn:

@@ -64,6 +64,8 @@ def main() -> None:
     args = parse_args()
     config = Config.load(args.config)
 
+    # Use the context manager so the SQLite connection closes on every exit
+    # path, even when Ctrl+C interrupts the dashboard loop.
     with db.connect(config.app.database_path) as conn:
         dashboard = DashboardSession(config, conn, enable_alerts=args.alerts)
         if args.collect:
@@ -84,6 +86,7 @@ class DashboardSession:
         self.menu = MenuController(config)
         self.printer = SnapshotPrinter()
         self.history = HistoryReporter(conn)
+        # Track which tiles changed so ``SnapshotPrinter`` can add emphasis.
         self._alert_metrics: Set[str] = set()
 
     def run(self, skip_initial_refresh: bool = False) -> None:
@@ -92,12 +95,15 @@ class DashboardSession:
         skip_refresh = skip_initial_refresh
         try:
             while True:
+                # Each loop either triggers a refresh or waits for the timer so
+                # the console output feels like a live dashboard.
                 if not skip_refresh:
                     self.refresh()
                 else:
                     skip_refresh = False
                 if not self.menu.prompt():
                     break
+                # Defensive clamp so a student entering "-5" never crashes the loop.
                 wait_seconds = max(0, int(self.config.app.poll_interval))
                 if wait_seconds:
                     print(f"Waiting {wait_seconds}s before the next automatic refresh...\n")
@@ -114,6 +120,8 @@ class DashboardSession:
             self.config.app.traffic_region,
         )
         collector.collect_once(self.config, self.conn)
+        # After persistence we fetch a fresh view so display + history use
+        # identical data.
         snapshot = db.get_latest(self.conn)
         highlights = self._detect_alerts()
         selection_summary = self.menu.selection_summary()
@@ -130,6 +138,8 @@ class DashboardSession:
             self._alert_metrics = set()
             return self._alert_metrics
         messenger = _RecordingMessenger()
+        # Run the storage-layer change detector but keep the alerts in memory
+        # so the UI can highlight the affected tiles.
         ChangeDetector(self.conn, messenger).run()
         self._alert_metrics = {message.metric for message in messenger.messages}
         return self._alert_metrics
@@ -148,6 +158,8 @@ class MenuController:
 
         menu_text = "Press Enter to refresh now, or choose: [d]istrict, [a]qhi, [t]raffic, [q]uit"
         while True:
+            # Keep prompting until the user either selects an action or exits;
+            # any blank input triggers an immediate refresh.
             try:
                 choice = input(f"{menu_text}\n> ").strip().lower()
             except EOFError:
@@ -184,6 +196,8 @@ class MenuController:
         attribute: str,
     ) -> None:
         """Prompt for a new menu selection and update the config in-place."""
+        # Some feeds have a known set of choices, so offer numbered menus first
+        # and fall back to manual text entry when mock data is unavailable.
         options = self._options.get(option_key, [])
         current_value = getattr(self.config.app, attribute)
         print(f"Current {label}: {current_value}")
@@ -240,6 +254,7 @@ class SnapshotPrinter:
         if selection_info:
             output_lines.append(selection_info)
         for title, body in sections:
+            # Highlight tiles whose metric changed in the latest refresh.
             prefix = "*** " if title in highlights else ""
             suffix = " ***" if title in highlights else ""
             header = f"{prefix}{title}{suffix}"
@@ -329,6 +344,7 @@ class _RecordingMessenger(ConsoleMessenger):
 def _load_menu_options(config: Config) -> Dict[str, List[str]]:
     """Build lookup tables for every dashboard selection type."""
 
+    # Precompute the dropdowns from mock data once so every menu change is fast.
     return {
         "rain": _extract_places(config.mocks.rainfall),
         "aqhi": _extract_aqhi_stations(config.mocks.aqhi),
@@ -354,6 +370,7 @@ def _extract_places(path: Path) -> List[str]:
     places: Set[str] = set()
     if isinstance(entries, list):
         for item in entries:
+            # Deduplicate names because the API includes multiple readings per district.
             if isinstance(item, dict) and item.get("place"):
                 places.add(str(item["place"]))
     return sorted(places)
@@ -374,6 +391,7 @@ def _extract_aqhi_stations(path: Path) -> List[str]:
         raw = payload.get("aqhi") or payload.get("data")
         if isinstance(raw, list):
             stations = [entry for entry in raw if isinstance(entry, dict)]
+    # Sorting ensures menu numbering stays stable across runs.
     names = sorted({str(entry["station"]) for entry in stations if entry.get("station")})
     return names
 
@@ -391,6 +409,7 @@ def _extract_regions(path: Path) -> List[str]:
         incidents = [entry for entry in payload if isinstance(entry, dict)]
     else:
         raw = None
+        # Vendors label the array differently, so try a few known keys.
         for key in ("trafficnews", "incidents", "data"):
             candidate = payload.get(key)
             if isinstance(candidate, list):
@@ -398,6 +417,7 @@ def _extract_regions(path: Path) -> List[str]:
                 break
         if isinstance(raw, list):
             incidents = [entry for entry in raw if isinstance(entry, dict)]
+    # Keep unique region names so menu numbering stays consistent.
     regions: Set[str] = set()
     for entry in incidents:
         region = entry.get("region") or entry.get("area")
@@ -413,6 +433,8 @@ def build_aqhi_history_report(
 
     if not station:
         return None
+    # Fetch the most recent rows for the requested station so the ASCII table
+    # mirrors what the dashboard currently shows.
     query = """
         SELECT station, category, value, updated_at
         FROM aqhi
@@ -460,6 +482,7 @@ def build_aqhi_history_report(
     max_value = max(values)
     mean_value = sum(values) / len(values)
     latest_change = values[0] - values[-1]
+    # Tacking on quick stats gives context without requiring additional graphs.
     stats_line = (
         f"Range {min_value:.1f}–{max_value:.1f}, "
         f"mean {mean_value:.1f}, latest change {latest_change:+.1f}"
@@ -474,6 +497,7 @@ def _format_timestamp(timestamp: str) -> str:
     try:
         dt = datetime.strptime(timestamp, db.ISO_FORMAT)
     except ValueError:
+        # Some manual fixtures use ISO8601 without timezone; try the flexible parser.
         try:
             dt = datetime.fromisoformat(timestamp)
         except ValueError:

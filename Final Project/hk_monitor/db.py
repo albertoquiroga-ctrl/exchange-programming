@@ -151,6 +151,8 @@ def save_traffic(conn: sqlite3.Connection, record: TrafficRecord) -> None:
 
 def _fetch_latest_two(conn: sqlite3.Connection, table: str) -> List[sqlite3.Row]:
     """Return the newest two rows for change detection."""
+    # ``table`` is controlled by the caller (warnings/rain/aqhi/traffic), so the
+    # simple f-string keeps the query readable for instructional purposes.
     cur = conn.execute(
         f"SELECT * FROM {table} ORDER BY id DESC LIMIT 2"
     )
@@ -187,6 +189,7 @@ def get_last_two(conn: sqlite3.Connection, table: str) -> List[sqlite3.Row]:
 def connect(db_path: Path) -> Iterator[sqlite3.Connection]:
     """Context manager that opens, yields, then closes the SQLite connection."""
 
+    # Reuse ``init_db`` so every caller benefits from auto-migrations.
     conn = init_db(db_path)
     try:
         yield conn

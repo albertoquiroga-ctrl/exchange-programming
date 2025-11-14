@@ -10,6 +10,8 @@ import re
 try:  # Python >=3.11
     import tomllib  # type: ignore[attr-defined]
 except ModuleNotFoundError:  # pragma: no cover - fallback for <3.11
+    # Keep compatibility with Python 3.9/3.10 environments commonly found in
+    # teaching labs by falling back to ``tomli``.
     import tomli as tomllib  # type: ignore[no-redef]
 
 
@@ -63,6 +65,8 @@ class Config:
         """
 
         requested_path = Path(path or "config.toml")
+        # Students often launch the CLI from various folders, so resolve the
+        # config by searching cwd, the package directory, and a few parents.
         config_path = _resolve_config_path(requested_path)
         if not config_path.exists():
             raise FileNotFoundError(
@@ -84,6 +88,8 @@ def _parse_app_config(data: Dict[str, Any], base: Path) -> AppConfig:
     """Coerce and validate the [app] section from the TOML payload."""
     database_raw = _require_str(data.get("database_path", "final_project.db"), "app.database_path")
     poll_interval = int(data.get("poll_interval", 300))
+    # Reject zero/negative refresh intervals early rather than creating a tight
+    # while loop in ``app.DashboardSession``.
     if poll_interval <= 0:
         raise ValueError("app.poll_interval must be a positive integer")
     return AppConfig(
@@ -98,6 +104,8 @@ def _parse_app_config(data: Dict[str, Any], base: Path) -> AppConfig:
 
 def _parse_api_config(data: Dict[str, Any]) -> ApiConfig:
     """Fill in API defaults while still allowing overrides in config.toml."""
+    # The defaults dictionary mirrors the URLs published by HK data sources so
+    # students can boot the project without editing config.
     defaults = {
         "warnings_url": "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=warnsum&lang=en",
         "rainfall_url": "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=en",
@@ -133,6 +141,7 @@ def _require_str(value: Any, field_name: str) -> str:
     """Validate string-like configuration entries and strip whitespace."""
     text = str(value).strip()
     if not text:
+        # Provide a descriptive error so students know which key to fix.
         raise ValueError(f"Configuration field '{field_name}' is required")
     return text
 
@@ -149,6 +158,8 @@ def _parse_toml(text: str) -> Dict[str, Any]:
     try:
         return tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
+        # Configs edited on Windows often contain ``C:\`` style paths; attempt
+        # to normalise them before surfacing the parse error.
         sanitised = _normalise_windows_paths(text)
         if sanitised != text:
             try:
