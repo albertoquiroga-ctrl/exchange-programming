@@ -19,6 +19,7 @@ import sys
 try:
     from . import db
 except ImportError:  # pragma: no cover - allow running as a script
+    # Allow `python alerts.py` to work even if the package is not installed.
     PACKAGE_ROOT = Path(__file__).resolve().parents[1]
     if str(PACKAGE_ROOT) not in sys.path:
         sys.path.insert(0, str(PACKAGE_ROOT))
@@ -78,6 +79,7 @@ class ChangeDetector:
         """Store the database handle and configure table-specific formatters."""
         self.conn = conn
         self.messenger = messenger or ConsoleMessenger()
+        # The formatters convert raw sqlite rows into consistent AlertMessages.
         self.table_config: Dict[str, Callable[[sqlite3.Row], AlertMessage]] = {
             "warnings": self._format_warning,
             "rain": self._format_rain,
@@ -96,6 +98,7 @@ class ChangeDetector:
         # formatted independently.
         triggered = 0
         for table, formatter in self.table_config.items():
+            # Pull the two latest rows so we can compare "current" vs "previous".
             rows = db.get_last_two(self.conn, table)
             if len(rows) < 2:
                 continue
@@ -158,12 +161,15 @@ def _extract_category(row: sqlite3.Row) -> str:
     for key in ("category", "level", "intensity", "severity"):
         if key in row.keys():
             return str(row[key])
+    # Falling back to an empty string avoids crashes while keeping noise low.
     return ""
 
 
 def _print_snapshot(snapshot: Dict[str, Optional[sqlite3.Row]]) -> None:
     """Print the freshest readings so the CLI is still informative without alerts."""
 
+    # Showing the latest values keeps the terminal output useful even when
+    # nothing triggered, so students can confirm the ingestion pipeline works.
     print("\nLatest snapshot:")
 
     def _print_section(title: str, text: str) -> None:
@@ -179,6 +185,7 @@ def _print_snapshot(snapshot: Dict[str, Optional[sqlite3.Row]]) -> None:
 def _describe_warning(row: Optional[sqlite3.Row]) -> str:
     if not row:
         return "No warning data available."
+    # Joining the lines here produces a friendly paragraph for the CLI snapshot.
     return (
         f"Level: {row['level']}\n"
         f"Message: {row['message']}\n"
@@ -189,6 +196,7 @@ def _describe_warning(row: Optional[sqlite3.Row]) -> str:
 def _describe_rain(row: Optional[sqlite3.Row]) -> str:
     if not row:
         return "No rain data available."
+    # Rain sections emphasize geography because alerts are location specific.
     return (
         f"District: {row['district']}\n"
         f"Intensity: {row['intensity']}\n"
@@ -199,6 +207,7 @@ def _describe_rain(row: Optional[sqlite3.Row]) -> str:
 def _describe_aqhi(row: Optional[sqlite3.Row]) -> str:
     if not row:
         return "No AQHI data available."
+    # Format numeric AQHI with one decimal place just like the government feed.
     return (
         f"Station: {row['station']}\n"
         f"Category: {row['category']}\n"
@@ -210,6 +219,7 @@ def _describe_aqhi(row: Optional[sqlite3.Row]) -> str:
 def _describe_traffic(row: Optional[sqlite3.Row]) -> str:
     if not row:
         return "No traffic data available."
+    # Traffic incidents often supply a short paragraph, so we trust the source.
     return (
         f"Severity: {row['severity']}\n"
         f"{row['description']}\n"
@@ -220,6 +230,7 @@ def _describe_traffic(row: Optional[sqlite3.Row]) -> str:
 def main(argv: Optional[Sequence[str]] = None) -> None:
     """Entry point for running the change detector as a standalone script."""
 
+    # Standard argparse usage so the script can be customised from the CLI.
     parser = argparse.ArgumentParser(description="HK Conditions Monitor alerts")
     parser.add_argument(
         "--config",
@@ -235,6 +246,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     config = Config.load(args.config)
     with db.connect(config.app.database_path) as conn:
+        # Pull today's snapshot before running the change detection so the
+        # summary can be printed whether or not alerts fire.
         snapshot = db.get_latest(conn)
         count = ChangeDetector(conn).run()
     if count == 0:
