@@ -91,8 +91,8 @@ def _parse_api_config(data: Dict[str, Any]) -> ApiConfig:
     defaults = {
         "warnings_url": "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=warnsum&lang=en",
         "rainfall_url": "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=en",
-        "aqhi_url": "https://data.weather.gov.hk/aq/data/aqhi.json",
-        "traffic_url": "https://resource.data.one.gov.hk/td/routesandregions/trafficnews_en.json",
+        "aqhi_url": "https://dashboard.data.gov.hk/api/aqhi-individual?format=json",
+        "traffic_url": "https://www.td.gov.hk/en/special_news/trafficnews.xml",
     }
     return ApiConfig(
         warnings_url=_require_str(data.get("warnings_url", defaults["warnings_url"]), "api.warnings_url"),

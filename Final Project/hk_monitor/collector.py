@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Dict
 import sqlite3
+import xml.etree.ElementTree as ET
 
 import requests
 
@@ -16,6 +17,7 @@ from .config import Config
 ISO_VARIANTS = ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ")
 LOGGER = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
+HTTP_HEADERS = {"User-Agent": "HKConditionsMonitor/1.0 (+https://data.gov.hk)"}
 
 
 def collect_once(
@@ -104,34 +106,66 @@ def fetch_aqhi(config: Config) -> db.AqhiRecord | None:
     if not station_entry:
         return None
     value = float(station_entry.get("aqhi", station_entry.get("value", 0)) or 0)
+    category = (
+        station_entry.get("health_risk")
+        or station_entry.get("category")
+        or _categorize_aqhi(value)
+    )
+    publish_time = station_entry.get("publish_date") or station_entry.get("time")
+    dataset_time = None
+    if isinstance(data, dict):
+        dataset_time = data.get("publishDate") or data.get("updateTime")
     return db.AqhiRecord(
         station=config.app.aqhi_station,
-        category=_categorize_aqhi(value),
+        category=str(category),
         value=value,
-        updated_at=_parse_time(station_entry.get("time") or data.get("updateTime")),
+        updated_at=_parse_time(publish_time or dataset_time),
     )
 
 
 def fetch_traffic(config: Config) -> db.TrafficRecord | None:
     data = _get_payload(
-        config, config.api.traffic_url, config.mocks.traffic, key="trafficnews"
+        config,
+        config.api.traffic_url,
+        config.mocks.traffic,
+        key="trafficnews",
+        parser=_parse_traffic_xml,
     )
     if isinstance(data, list):
         incidents = data
     else:
         incidents = data.get("trafficnews") or data.get("incidents") or []
-    entry = next(
-        (row for row in incidents if config.app.traffic_region in row.get("region", "")),
-        None,
-    )
-    if not entry:
+    if not incidents:
         return None
+
+    target = config.app.traffic_region.strip().lower()
+
+    def _matches(entry: Dict[str, Any]) -> bool:
+        if not target:
+            return True
+        haystack = " ".join(
+            filter(
+                None,
+                [
+                    entry.get("region"),
+                    entry.get("location"),
+                    entry.get("direction"),
+                    entry.get("content"),
+                ],
+            )
+        ).lower()
+        return target in haystack
+
+    entry = next((row for row in incidents if _matches(row)), None) or incidents[0]
     severity = entry.get("severity", entry.get("category", "info"))
     description = entry.get("content") or entry.get("summary") or "Traffic update"
+    updated = entry.get("update_time")
+    if not updated and isinstance(data, dict):
+        updated = data.get("updateTime")
     return db.TrafficRecord(
         severity=severity.title(),
         description=description.strip(),
-        updated_at=_parse_time(entry.get("update_time") or data.get("updateTime")),
+        updated_at=_parse_time(updated),
     )
 
 
@@ -174,14 +208,18 @@ def _parse_time(raw: str | None) -> datetime:
 
 
 def _get_payload(
-    config: Config, url: str, mock_path: Path, key: str | None = None
+    config: Config,
+    url: str,
+    mock_path: Path,
+    key: str | None = None,
+    parser: Callable[[str], Any] | None = None,
 ) -> Any:
     cache_path = _cache_path(mock_path, key)
     if config.app.use_mock_data:
         payload = _load_from_disk(mock_path)
         _persist_cache(cache_path, payload)
     else:
-        payload = _fetch_live_payload(url, cache_path)
+        payload = _fetch_live_payload(url, cache_path, parser=parser)
     if key and isinstance(payload, dict):
         if key in payload:
             return payload[key]
@@ -191,16 +229,21 @@ def _get_payload(
     return payload
 
 
-def _fetch_live_payload(url: str, cache_path: Path) -> Any:
+def _fetch_live_payload(
+    url: str, cache_path: Path, parser: Callable[[str], Any] | None = None
+) -> Any:
     last_error: Exception | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, timeout=10, headers=HTTP_HEADERS)
             response.raise_for_status()
-            payload = response.json()
+            if parser:
+                payload = parser(response.text)
+            else:
+                payload = response.json()
             _persist_cache(cache_path, payload)
             return payload
-        except (requests.RequestException, ValueError) as exc:
+        except (requests.RequestException, ValueError, ET.ParseError) as exc:
             last_error = exc
             LOGGER.warning(
                 "Attempt %s/%s to fetch %s failed: %s",
@@ -246,6 +289,45 @@ def _load_cached_payload(path: Path) -> Any | None:
 def _load_from_disk(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def _parse_traffic_xml(text: str) -> Dict[str, Any]:
+    root = ET.fromstring(text)
+    incidents = []
+    for message in root.findall(".//message"):
+        payload = {child.tag.lower(): (child.text or "").strip() for child in message}
+        region = (
+            payload.get("district_en")
+            or payload.get("direction_en")
+            or payload.get("location_en")
+            or payload.get("incident_heading_en")
+            or ""
+        )
+        severity = (
+            payload.get("incident_heading_en")
+            or payload.get("incident_detail_en")
+            or payload.get("incident_status_en")
+            or "Info"
+        )
+        description = (
+            payload.get("content_en")
+            or payload.get("incident_detail_en")
+            or payload.get("incident_heading_en")
+            or "Traffic update"
+        )
+        incidents.append(
+            {
+                "region": region,
+                "severity": severity,
+                "content": description,
+                "description": description,
+                "update_time": payload.get("announcement_date"),
+                "location": payload.get("location_en"),
+                "direction": payload.get("direction_en"),
+                "status": payload.get("incident_status_en"),
+            }
+        )
+    return {"trafficnews": incidents}
 
 
 __all__ = [
