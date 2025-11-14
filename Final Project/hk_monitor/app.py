@@ -5,15 +5,24 @@ import argparse
 import json
 import logging
 import sqlite3
+import sys
 import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set
 
 import pandas as pd
 
-from . import alerts, collector, db
-from .alerts import ChangeDetector, ConsoleMessenger
-from .config import Config
+try:
+    from . import alerts, collector, db
+    from .alerts import ChangeDetector, ConsoleMessenger
+    from .config import Config
+except ImportError:  # pragma: no cover - allows running as a script
+    PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+    if str(PACKAGE_ROOT) not in sys.path:
+        sys.path.insert(0, str(PACKAGE_ROOT))
+    from hk_monitor import alerts, collector, db
+    from hk_monitor.alerts import ChangeDetector, ConsoleMessenger
+    from hk_monitor.config import Config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s - %(message)s")
 
