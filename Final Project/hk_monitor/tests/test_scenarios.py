@@ -6,12 +6,11 @@ from pathlib import Path
 from hk_monitor import alerts, collector, config, db
 
 
-class DummyMessenger(alerts.TelegramClient):
+class DummyMessenger:
     def __init__(self) -> None:
-        super().__init__(token="", chat_id="", enabled=False, test_mode=True)
         self.messages: list[alerts.AlertMessage] = []
 
-    def send(self, message: alerts.AlertMessage) -> None:  # type: ignore[override]
+    def send(self, message: alerts.AlertMessage) -> None:
         self.messages.append(message)
 
 

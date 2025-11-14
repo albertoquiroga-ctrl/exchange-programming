@@ -12,7 +12,7 @@ pip install -r requirements.txt
 cp config.template.toml config.toml
 ```
 
-Adjust the config to point to your preferred district/station and optionally set the Telegram bot token/chat ID.
+Adjust the config to point to your preferred district/station.  No external tokens or services are required for the console-only workflow.
 
 ## Interactive console dashboard
 
@@ -20,7 +20,7 @@ The CLI now launches an interactive dashboard.  After selecting your configurati
 
 * Press **Enter** to refresh the four tiles immediately.
 * Type **d**, **a** or **t** to switch the monitored rain district, AQHI station or traffic region using the values discovered in the bundled mock payloads.
-* Pass `--alerts` to enable Telegram change detection — tiles that triggered an alert on the last refresh are highlighted inline.
+* Pass `--alerts` to enable local change detection — tiles that triggered an alert on the last refresh are highlighted inline.
 * Review the **pandas-powered AQHI history table** that now appears under every snapshot, summarising the most recent readings, their mean/min/max and the latest change.  It makes the console demo feel closer to a mini dashboard than a set of raw HTTP calls.
 
 Example command:

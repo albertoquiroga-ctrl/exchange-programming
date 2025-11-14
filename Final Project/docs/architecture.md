@@ -13,7 +13,7 @@ graph TD
         CFG["Config loader & validation"]
         COLLECT["Collector module"]
         DB[("SQLite snapshots")]
-        ALERTS["Change detector + Telegram client"]
+        ALERTS["Change detector + console messenger"]
         CLI["Interactive CLI dashboard"]
     end
 
@@ -27,14 +27,13 @@ graph TD
     DB --> CLI
     DB --> ALERTS
     ALERTS --> CLI
-    ALERTS --> TELEGRAM["Telegram Bot API"]
 ```
 
 ## Data flow notes
 - Collectors run inside the CLI loop (or scheduler) using the configuration context.
 - Each run persists the latest snapshot and reuses SQLite both for persistence and change detection.
-- Alerts feed both Telegram (live) and the CLI highlights so presenters can narrate incidents.
+- Alerts feed the CLI highlights and console transcript so presenters can narrate incidents directly from the terminal.
 
 ## Deployment view
 - Local execution: `python -m hk_monitor.app` with mock data.
-- Production: run collectors via cron/systemd and forward alerts to Telegram while the CLI offers on-demand tiles.
+- Production: run collectors via cron/systemd and rely on the CLI for on-demand tiles and alert transcripts.
