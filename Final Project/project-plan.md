@@ -52,6 +52,10 @@ app.py CLI  →  prints latest tiles, accepts simple user input
    - Pytest/unit tests for parsers, category mapping, and change detection; scenario scripts: warning upgrade, AQHI spike, traffic incident.
 8. **Slides/Report**
    - Architecture/dataflow diagrams, screenshots (CLI views + alert transcripts), summary of libraries, lessons learned.
+9. **Readability & Onboarding**
+   - **Redistribution narrative**: Ensure `README.md`, `Final Project/hk_monitor/README.md`, and `docs/owners.md` all reference the same redistribution story so newcomers immediately learn why work moved into the three streams. **Acceptance criteria:** single-source definition of the redistribution goals, repo-root link to the detailed plan, and language that makes clear who owns each stream.
+   - **Legible rewrite**: Rework the collectors and adjacent modules (config loader, DB helpers) so every critical branch reads like a tutorial. **Acceptance criteria:** public functions start with short docstrings stating inputs/outputs, branching logic uses descriptive helper names rather than nested `if` chains, and the collectors compile under `pytest -q` with zero `TODO` or `FIXME` markers remaining.
+   - **Heavy commenting & onboarding aids**: Layer explanatory comments, diagrams, and SOP snippets wherever execution jumps across modules. **Acceptance criteria:** each module referenced in the onboarding doc contains section headers or block comments explaining the execution order, every config option has an inline explanation or table row describing defaults, and a new engineer can follow a linked “day one runbook” without asking for clarification.
 
 ## 4. Team Roles & Ownership
 | Role | Focus | Key Deliverables |
