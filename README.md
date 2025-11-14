@@ -61,6 +61,9 @@ A consolidated workspace for my exchange-course exercises. It tracks every lectu
 | `ECON7890 - Course Intro - 202509.pdf`, `ECON7890 - Python and Tools.pdf`, `ECON 7890_Big_Data_Analytics_Programming_20190710.pdf` | Slide decks and course material PDFs. |
 | `References/pythonlearn (1).pdf` | Additional reading (Think Python companion). |
 
+### Final Project Team
+Meet the HK Conditions Monitor crew and their Dev A–F responsibilities in the [owner map](Final%20Project/docs/owners.md) so reviewers can jump straight to the contribution summary.
+
 ## Working With The Material
 - **Run lecture/exercise scripts**: `python ".\Intro to Python Lectures\a2-3-loop.py"` or `python ".\Excercises\class4_ex_loop.py"`. Interactive prompts will pause until you provide input.
 - **Import helpers elsewhere**: Keep experimentation code inside `if __name__ == "__main__":` blocks so functions remain reusable from notebooks or other modules.
