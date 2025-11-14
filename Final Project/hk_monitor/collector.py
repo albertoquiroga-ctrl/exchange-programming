@@ -262,6 +262,7 @@ def _pick_traffic_entry(
 # === Domain-specific helpers ===
 
 def _categorize_rain(value: float) -> str:
+    """Map millimetres of rainfall to the HK Observatory warning levels."""
     if value >= 30:
         return "Black Rain"
     if value >= 15:
@@ -274,6 +275,7 @@ def _categorize_rain(value: float) -> str:
 
 
 def _categorize_aqhi(value: float) -> str:
+    """Translate AQHI numbers into the textual bands used by HK authorities."""
     if value >= 10:
         return "Serious"
     if value >= 7:

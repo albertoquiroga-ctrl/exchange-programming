@@ -77,6 +77,7 @@ class DashboardSession:
     def __init__(
         self, config: Config, conn: sqlite3.Connection, enable_alerts: bool = False
     ) -> None:
+        """Prepare helper objects that own user input, printing, and history."""
         self.config = config
         self.conn = conn
         self.enable_alerts = enable_alerts
@@ -86,6 +87,7 @@ class DashboardSession:
         self._alert_metrics: Set[str] = set()
 
     def run(self, skip_initial_refresh: bool = False) -> None:
+        """Drive the interactive loop until the user exits or interrupts."""
         print("Launching HK Conditions Monitor dashboard. Press Ctrl+C or choose 'q' to exit.")
         skip_refresh = skip_initial_refresh
         try:
@@ -104,6 +106,7 @@ class DashboardSession:
             print("\nExiting dashboard.")
 
     def refresh(self) -> None:
+        """Collect new data, redraw the dashboard, and print AQHI history."""
         logging.info(
             "Refreshing snapshot for %s / %s / %s",
             self.config.app.rain_district,
@@ -122,6 +125,7 @@ class DashboardSession:
         self.history.print_report(self.config.app.aqhi_station)
 
     def _detect_alerts(self) -> Set[str]:
+        """Return the set of metrics whose severity changed on the last refresh."""
         if not self.enable_alerts:
             self._alert_metrics = set()
             return self._alert_metrics
@@ -135,6 +139,7 @@ class MenuController:
     """Handle user selections for the dashboard menu."""
 
     def __init__(self, config: Config):
+        """Cache menu options and store a reference to the shared config."""
         self.config = config
         self._options = _load_menu_options(config)
 
@@ -163,6 +168,7 @@ class MenuController:
             print("Unknown command. Please choose one of the listed options.")
 
     def selection_summary(self) -> str:
+        """Describe the currently selected locations for quick reference."""
         return (
             "District: {district} | AQHI station: {station} | Traffic region: {region}".format(
                 district=self.config.app.rain_district,
@@ -177,6 +183,7 @@ class MenuController:
         label: str,
         attribute: str,
     ) -> None:
+        """Prompt for a new menu selection and update the config in-place."""
         options = self._options.get(option_key, [])
         current_value = getattr(self.config.app, attribute)
         print(f"Current {label}: {current_value}")
@@ -206,6 +213,7 @@ class MenuController:
 
     @staticmethod
     def _print_options(options: Sequence[str]) -> None:
+        """List the enumerated options so students can match numbers to text."""
         for index, value in enumerate(options, start=1):
             print(f"  {index}. {value}")
 
@@ -219,6 +227,7 @@ class SnapshotPrinter:
         highlights: Set[str],
         selection_info: Optional[str],
     ) -> None:
+        """Assemble the four metric sections and add emphasis where needed."""
         sections = [
             ("Warnings", self._format_warning(snapshot.get("warnings"))),
             ("Rain", self._format_rain(snapshot.get("rain"))),
@@ -241,6 +250,7 @@ class SnapshotPrinter:
 
     @staticmethod
     def _format_warning(row: Optional[sqlite3.Row]) -> str:
+        """Return a friendly, multi-line message for the warnings tile."""
         if not row:
             return "No warning data."
         return (
@@ -251,6 +261,7 @@ class SnapshotPrinter:
 
     @staticmethod
     def _format_rain(row: Optional[sqlite3.Row]) -> str:
+        """Describe rainfall intensity along with the target district."""
         if not row:
             return "No rain data."
         return (
@@ -261,6 +272,7 @@ class SnapshotPrinter:
 
     @staticmethod
     def _format_aqhi(row: Optional[sqlite3.Row]) -> str:
+        """Summarise the AQHI snapshot for the configured station."""
         if not row:
             return "No AQHI data."
         value = row["value"]
@@ -274,6 +286,7 @@ class SnapshotPrinter:
 
     @staticmethod
     def _format_traffic(row: Optional[sqlite3.Row]) -> str:
+        """Show the most recent incident with severity and description."""
         if not row:
             return "No traffic data."
         return (
@@ -287,9 +300,11 @@ class HistoryReporter:
     """Generate AQHI history tables for the selected station."""
 
     def __init__(self, conn: sqlite3.Connection):
+        """Store the connection so repeated reports reuse the same handle."""
         self.conn = conn
 
     def print_report(self, station: str) -> None:
+        """Print the optional history table below the dashboard snapshot."""
         report = build_aqhi_history_report(self.conn, station)
         if report:
             print("\n" + report)
@@ -299,10 +314,12 @@ class _RecordingMessenger(ConsoleMessenger):
     """Console messenger that keeps the alert list for highlighting."""
 
     def __init__(self) -> None:
+        """Initialise the parent console messenger and capture alert history."""
         super().__init__()
         self.messages: List[alerts.AlertMessage] = []
 
     def send(self, message: alerts.AlertMessage) -> None:  # type: ignore[override]
+        """Display the alert and retain it for later highlighting."""
         super().send(message)
         self.messages.append(message)
 
@@ -429,6 +446,7 @@ def build_aqhi_history_report(
             widths[index] = max(widths[index], len(cell))
 
     def _format_row(cells: List[str]) -> str:
+        """Pad each column so the ASCII table stays aligned."""
         return " | ".join(cell.ljust(widths[index]) for index, cell in enumerate(cells))
 
     lines = [

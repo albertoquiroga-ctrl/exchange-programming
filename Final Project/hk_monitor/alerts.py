@@ -8,19 +8,29 @@
 # so the control flow is easy to follow.
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Protocol, TextIO
+from typing import Callable, Dict, Optional, Protocol, Sequence, TextIO
+from pathlib import Path
 import logging
 import sqlite3
 import sys
 
-from . import db
+try:
+    from . import db
+except ImportError:  # pragma: no cover - allow running as a script
+    PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+    if str(PACKAGE_ROOT) not in sys.path:
+        sys.path.insert(0, str(PACKAGE_ROOT))
+    from hk_monitor import db
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
 class AlertMessage:
+    """Structured alert that captures the metric and the before/after states."""
+
     metric: str
     previous: str
     current: str
@@ -39,6 +49,7 @@ class Messenger(Protocol):
     """Simple protocol describing objects that can receive alert messages."""
 
     def send(self, message: AlertMessage) -> None:
+        """Push a fully formatted alert to the downstream transport."""
         ...
 
 
@@ -46,20 +57,25 @@ class ConsoleMessenger:
     """Messenger that prints alerts to stdout for local demos."""
 
     def __init__(self, stream: Optional[TextIO] = None):
+        """Allow dependency injection of the output stream for easier testing."""
         self.stream = stream or sys.stdout
 
     def send(self, message: AlertMessage) -> None:  # pragma: no cover - console feedback
+        """Render the alert on the console and mirror it through logging."""
         text = message.format()
         logger.info("[ALERT] %s", text.replace("\n", " | "))
         print(text, file=self.stream)
 
 
 class ChangeDetector:
+    """Compare the two newest rows per metric and emit alerts when categories change."""
+
     def __init__(
         self,
         conn: sqlite3.Connection,
         messenger: Optional[Messenger] = None,
     ):
+        """Store the database handle and configure table-specific formatters."""
         self.conn = conn
         self.messenger = messenger or ConsoleMessenger()
         self.table_config: Dict[str, Callable[[sqlite3.Row], AlertMessage]] = {
@@ -69,11 +85,16 @@ class ChangeDetector:
             "traffic": self._format_traffic,
         }
 
-    def run(self) -> None:
-        """Compare the newest and previous rows per table and send alerts."""
+    def run(self) -> int:
+        """Compare the newest and previous rows per table and send alerts.
+
+        Returns:
+            Number of alerts emitted during this run.
+        """
 
         # Step 1: iterate over each metric table so different feed types can be
         # formatted independently.
+        triggered = 0
         for table, formatter in self.table_config.items():
             rows = db.get_last_two(self.conn, table)
             if len(rows) < 2:
@@ -87,8 +108,11 @@ class ChangeDetector:
             alert.previous = _extract_category(previous)
             alert.current = _extract_category(current)
             self.messenger.send(alert)
+            triggered += 1
+        return triggered
 
     def _format_warning(self, row: sqlite3.Row) -> AlertMessage:
+        """Translate warning rows into a consistent AlertMessage structure."""
         return AlertMessage(
             metric="Warnings",
             previous=row["level"],
@@ -97,6 +121,7 @@ class ChangeDetector:
         )
 
     def _format_rain(self, row: sqlite3.Row) -> AlertMessage:
+        """Describe rainfall alerts by pairing the district and the intensity."""
         description = f"{row['district']}: {row['intensity']}"
         return AlertMessage(
             metric="Rain",
@@ -106,6 +131,7 @@ class ChangeDetector:
         )
 
     def _format_aqhi(self, row: sqlite3.Row) -> AlertMessage:
+        """Summarise AQHI changes with the numeric value and station name."""
         description = f"{row['station']} AQHI {row['value']:.1f}"
         return AlertMessage(
             metric="AQHI",
@@ -115,6 +141,7 @@ class ChangeDetector:
         )
 
     def _format_traffic(self, row: sqlite3.Row) -> AlertMessage:
+        """Surface traffic incidents, highlighting severity and description."""
         return AlertMessage(
             metric="Traffic",
             previous=row["severity"],
@@ -134,4 +161,89 @@ def _extract_category(row: sqlite3.Row) -> str:
     return ""
 
 
+def _print_snapshot(snapshot: Dict[str, Optional[sqlite3.Row]]) -> None:
+    """Print the freshest readings so the CLI is still informative without alerts."""
+
+    print("\nLatest snapshot:")
+
+    def _print_section(title: str, text: str) -> None:
+        underline = "-" * len(title)
+        print(f"{title}\n{underline}\n{text}\n")
+
+    _print_section("Warnings", _describe_warning(snapshot.get("warnings")))
+    _print_section("Rain", _describe_rain(snapshot.get("rain")))
+    _print_section("AQHI", _describe_aqhi(snapshot.get("aqhi")))
+    _print_section("Traffic", _describe_traffic(snapshot.get("traffic")))
+
+
+def _describe_warning(row: Optional[sqlite3.Row]) -> str:
+    if not row:
+        return "No warning data available."
+    return (
+        f"Level: {row['level']}\n"
+        f"Message: {row['message']}\n"
+        f"Updated: {row['updated_at']}"
+    )
+
+
+def _describe_rain(row: Optional[sqlite3.Row]) -> str:
+    if not row:
+        return "No rain data available."
+    return (
+        f"District: {row['district']}\n"
+        f"Intensity: {row['intensity']}\n"
+        f"Updated: {row['updated_at']}"
+    )
+
+
+def _describe_aqhi(row: Optional[sqlite3.Row]) -> str:
+    if not row:
+        return "No AQHI data available."
+    return (
+        f"Station: {row['station']}\n"
+        f"Category: {row['category']}\n"
+        f"Value: {row['value']:.1f}\n"
+        f"Updated: {row['updated_at']}"
+    )
+
+
+def _describe_traffic(row: Optional[sqlite3.Row]) -> str:
+    if not row:
+        return "No traffic data available."
+    return (
+        f"Severity: {row['severity']}\n"
+        f"{row['description']}\n"
+        f"Updated: {row['updated_at']}"
+    )
+
+
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    """Entry point for running the change detector as a standalone script."""
+
+    parser = argparse.ArgumentParser(description="HK Conditions Monitor alerts")
+    parser.add_argument(
+        "--config",
+        default="config.toml",
+        help="Path to the TOML configuration file (default: config.toml)",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        from .config import Config
+    except ImportError:  # pragma: no cover - mirrors the db fallback above
+        from hk_monitor.config import Config
+
+    config = Config.load(args.config)
+    with db.connect(config.app.database_path) as conn:
+        snapshot = db.get_latest(conn)
+        count = ChangeDetector(conn).run()
+    if count == 0:
+        print("No alerts triggered.")
+    _print_snapshot(snapshot)
+
+
 __all__ = ["ChangeDetector", "AlertMessage", "ConsoleMessenger", "Messenger"]
+
+
+if __name__ == "__main__":
+    main()

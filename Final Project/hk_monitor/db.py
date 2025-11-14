@@ -19,6 +19,7 @@ ISO_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 
 @dataclass(slots=True)
 class WarningRecord:
+    """Row model for severe weather warnings from the HK Observatory."""
     level: str
     message: str
     updated_at: datetime
@@ -26,6 +27,7 @@ class WarningRecord:
 
 @dataclass(slots=True)
 class RainRecord:
+    """Single reading of rain intensity for the configured district."""
     district: str
     intensity: str
     updated_at: datetime
@@ -33,6 +35,7 @@ class RainRecord:
 
 @dataclass(slots=True)
 class AqhiRecord:
+    """Air Quality Health Index measurement with numeric value and category."""
     station: str
     category: str
     value: float
@@ -41,6 +44,7 @@ class AqhiRecord:
 
 @dataclass(slots=True)
 class TrafficRecord:
+    """Description of a traffic incident affecting one of the regions."""
     severity: str
     description: str
     updated_at: datetime

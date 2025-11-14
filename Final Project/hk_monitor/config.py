@@ -15,6 +15,8 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for <3.11
 
 @dataclass(slots=True)
 class AppConfig:
+    """Runtime options that influence how the console dashboard behaves."""
+
     database_path: Path
     poll_interval: int
     rain_district: str
@@ -25,6 +27,8 @@ class AppConfig:
 
 @dataclass(slots=True)
 class ApiConfig:
+    """Endpoints for the upstream data providers."""
+
     warnings_url: str
     rainfall_url: str
     aqhi_url: str
@@ -33,6 +37,8 @@ class ApiConfig:
 
 @dataclass(slots=True)
 class MockPaths:
+    """Filesystem locations for offline payloads used while developing."""
+
     warnings: Path
     rainfall: Path
     aqhi: Path
@@ -41,6 +47,8 @@ class MockPaths:
 
 @dataclass(slots=True)
 class Config:
+    """Top-level container that groups application, API, and mock settings."""
+
     app: AppConfig
     api: ApiConfig
     mocks: MockPaths
@@ -73,6 +81,7 @@ class Config:
 
 
 def _parse_app_config(data: Dict[str, Any], base: Path) -> AppConfig:
+    """Coerce and validate the [app] section from the TOML payload."""
     database_raw = _require_str(data.get("database_path", "final_project.db"), "app.database_path")
     poll_interval = int(data.get("poll_interval", 300))
     if poll_interval <= 0:
@@ -88,6 +97,7 @@ def _parse_app_config(data: Dict[str, Any], base: Path) -> AppConfig:
 
 
 def _parse_api_config(data: Dict[str, Any]) -> ApiConfig:
+    """Fill in API defaults while still allowing overrides in config.toml."""
     defaults = {
         "warnings_url": "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=warnsum&lang=en",
         "rainfall_url": "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=en",
@@ -103,7 +113,9 @@ def _parse_api_config(data: Dict[str, Any]) -> ApiConfig:
 
 
 def _parse_mock_paths(data: Dict[str, Any], base: Path) -> MockPaths:
+    """Resolve mock payload paths relative to the config file location."""
     def _resolve(key: str, default: str) -> Path:
+        """Ensure every mock file exists so --collect never crashes mid-run."""
         resolved = (base / str(data.get(key, default))).resolve()
         if not resolved.exists():
             raise ValueError(f"Mock payload '{resolved}' was not found")
@@ -118,6 +130,7 @@ def _parse_mock_paths(data: Dict[str, Any], base: Path) -> MockPaths:
 
 
 def _require_str(value: Any, field_name: str) -> str:
+    """Validate string-like configuration entries and strip whitespace."""
     text = str(value).strip()
     if not text:
         raise ValueError(f"Configuration field '{field_name}' is required")
@@ -146,7 +159,9 @@ def _parse_toml(text: str) -> Dict[str, Any]:
 
 
 def _normalise_windows_paths(text: str) -> str:
+    """Replace backslashes with forward slashes for TOML-friendly parsing."""
     def _replace(match: re.Match[str]) -> str:
+        """Perform the actual substitution while keeping the key untouched."""
         prefix, value = match.groups()
         if "\\" not in value:
             return match.group(0)
