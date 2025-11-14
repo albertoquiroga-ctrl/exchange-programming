@@ -1,4 +1,11 @@
 """Console demo for the HK Conditions Monitor."""
+
+# === Interactive console front-end ===
+
+# This module is the "face" of the pipeline: we parse CLI flags, drive the
+# collectors, persist rows into SQLite, and present a narrated dashboard.  The
+# comments below explain the order in which each responsibility executes so the
+# file reads like a guided tour.
 from __future__ import annotations
 
 import argparse
@@ -28,6 +35,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI options for the dashboard demo."""
+
+    # Step 1: configure the CLI interface exactly once so both scripts and
+    # direct ``python -m`` invocations behave the same.
     parser = argparse.ArgumentParser(description="HK Conditions Monitor CLI")
     parser.add_argument(
         "--config",
@@ -48,12 +59,20 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Launch the console dashboard according to the supplied arguments."""
+
+    # Step 1: parse command-line options and load the TOML config referenced by
+    # ``--config`` so the CLI mirrors the config-driven pipeline used by tests.
     args = parse_args()
     config = Config.load(args.config)
 
+    # Step 2: keep the SQLite connection open for the whole session so history
+    # queries, change detection, and writes share the same handle.
     with db.connect(config.app.database_path) as conn:
         dashboard = DashboardSession(config, conn, enable_alerts=args.alerts)
         if args.collect:
+            # Step 3: optionally run an immediate refresh so the user can see a
+            # populated dashboard before the prompt appears.
             dashboard.refresh(skip_wait=True)
         dashboard.run(skip_initial_refresh=args.collect)
 
@@ -70,6 +89,8 @@ class DashboardSession:
 
     def run(self, skip_initial_refresh: bool = False) -> None:
         print("Launching HK Conditions Monitor dashboard. Press Ctrl+C or choose 'q' to exit.")
+        # Step 1: alternate between automatic refreshes and user prompts until
+        # the user quits or hits Ctrl+C.
         try:
             while True:
                 if not skip_initial_refresh:
@@ -80,27 +101,35 @@ class DashboardSession:
                     break
                 wait_seconds = max(0, int(self.config.app.poll_interval))
                 if wait_seconds:
+                    # Poll interval is stored as ``float`` in TOML, so cast to
+                    # ``int`` here to avoid fractional sleeps and log spam.
                     print(f"Waiting {wait_seconds}s before the next automatic refresh...\n")
                     time.sleep(wait_seconds)
         except KeyboardInterrupt:
             print("\nExiting dashboard.")
 
     def refresh(self, skip_wait: bool = False) -> None:
+        # Step 1: log the selected district/station/region so terminal output
+        # tells readers which choices produced the snapshot.
         logging.info(
             "Refreshing snapshot for %s / %s / %s",
             self.config.app.rain_district,
             self.config.app.aqhi_station,
             self.config.app.traffic_region,
         )
+        # Step 2: fetch the latest metrics and persist them via the collector.
         collector.collect_once(self.config, self.conn)
         snapshot = db.get_latest(self.conn)
         if self.enable_alerts:
+            # Step 3: route the new rows through change detection and keep track
+            # of which tiles emitted alerts so we can highlight them inline.
             messenger = _RecordingMessenger()
             ChangeDetector(self.conn, messenger).run()
             self.alert_metrics = {message.metric for message in messenger.messages}
         else:
             self.alert_metrics = set()
 
+        # Step 4: render the four-tile snapshot along with the selection summary.
         _print_snapshot(
             snapshot,
             highlights=self.alert_metrics,
@@ -111,6 +140,8 @@ class DashboardSession:
             self.conn, self.config.app.aqhi_station
         )
         if history_report:
+            # Step 5: display the pandas table so viewers see recent AQHI trends
+            # without leaving the console.
             print("\n" + history_report)
         if skip_wait:
             return
@@ -125,6 +156,8 @@ class DashboardSession:
         )
 
     def _prompt_loop(self) -> bool:
+        """Handle repeated dashboard menu interactions."""
+
         menu = "Press Enter to refresh now, or choose: [d]istrict, [a]qhi, [t]raffic, [q]uit"
         while True:
             try:
@@ -153,6 +186,7 @@ class DashboardSession:
                     "traffic_region",
                 )
                 continue
+            # Any other keystrokes are invalid; loop to prompt the user again.
             print("Unknown command. Please choose one of the listed options.")
 
     def _change_selection(
@@ -165,6 +199,8 @@ class DashboardSession:
         current_value = getattr(self.config.app, attribute)
         print(f"Current {label}: {current_value}")
         if options:
+            # Step 1: show a numbered list based on the values discovered in the
+            # mock payloads.
             self._print_options(options)
             selection = input(f"Select a new {label} (number) or press Enter to keep current: ").strip()
             if not selection:
@@ -180,6 +216,8 @@ class DashboardSession:
             else:
                 print("Selection out of range, keeping current value.")
         else:
+            # When no curated options exist, accept free-form text but only
+            # persist it when the user typed something non-empty.
             manual = input(f"Type a new {label} and press Enter (blank to cancel): ").strip()
             if manual:
                 setattr(self.config.app, attribute, manual)
@@ -203,7 +241,10 @@ class _RecordingMessenger(ConsoleMessenger):
         self.messages.append(message)
 
 
+# === Menu discovery helpers ===
+
 def _load_menu_options(config: Config) -> Dict[str, List[str]]:
+    """Build lookup tables for every dashboard selection type."""
     return {
         "rain": _extract_places(config.mocks.rainfall),
         "aqhi": _extract_aqhi_stations(config.mocks.aqhi),
@@ -212,6 +253,7 @@ def _load_menu_options(config: Config) -> Dict[str, List[str]]:
 
 
 def _extract_places(path: Path) -> List[str]:
+    """Read the mock rainfall payload and list the available districts."""
     try:
         with path.open("r", encoding="utf-8") as fh:
             payload = json.load(fh)
@@ -225,6 +267,7 @@ def _extract_places(path: Path) -> List[str]:
 
 
 def _extract_aqhi_stations(path: Path) -> List[str]:
+    """Read the mock AQHI payload and surface unique station names."""
     try:
         with path.open("r", encoding="utf-8") as fh:
             payload = json.load(fh)
@@ -238,6 +281,7 @@ def _extract_aqhi_stations(path: Path) -> List[str]:
 
 
 def _extract_regions(path: Path) -> List[str]:
+    """Read the mock traffic payload and surface named regions."""
     try:
         with path.open("r", encoding="utf-8") as fh:
             payload = json.load(fh)
@@ -260,6 +304,10 @@ def _print_snapshot(
     highlights: Optional[Iterable[str]] = None,
     selection_info: str | None = None,
 ) -> None:
+    """Render the dashboard tiles with optional highlighting."""
+
+    # Each formatter returns a multi-line string summarising the most recent row
+    # so the caller can focus on assembling the final view.
     def format_warning(row: Optional[sqlite3.Row]) -> str:
         if not row:
             return "No warning data."
@@ -290,6 +338,8 @@ def _print_snapshot(
         ("Traffic", format_traffic(snapshot.get("traffic"))),
     ]
 
+    # ``highlights`` may be ``None``; convert to ``set`` once so we can test
+    # membership quickly while building the banner text.
     highlights = set(highlights or [])
     separator = "\n" + "=" * 60 + "\n"
     output_lines = []
@@ -311,6 +361,8 @@ def build_aqhi_history_report(
     if not station:
         return None
 
+    # Step 1: fetch the most recent ``limit`` readings for the requested
+    # station; ``parse_dates`` keeps ``updated_at`` timezone-aware for display.
     query = """
         SELECT station, category, value, updated_at
         FROM aqhi
@@ -328,6 +380,8 @@ def build_aqhi_history_report(
     if df.empty:
         return None
 
+    # Step 2: normalize timestamps to pandas ``datetime64`` so we can format
+    # them consistently for presentation.
     df["updated_at"] = pd.to_datetime(df["updated_at"])
     printable = (
         df.copy()
@@ -336,6 +390,7 @@ def build_aqhi_history_report(
         [["Timestamp", "AQHI", "Category"]]
     )
 
+    # Step 3: crunch simple stats so the console report feels closer to a chart.
     stats = df["value"].agg(["min", "max", "mean"])
     change = df.iloc[0]["value"] - df.iloc[-1]["value"] if len(df) > 1 else 0.0
     stats_line = (

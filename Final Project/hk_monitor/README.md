@@ -14,6 +14,17 @@ cp config.template.toml config.toml
 
 Adjust the config to point to your preferred district/station.  No external tokens or services are required for the console-only workflow.
 
+## How to read this module
+
+The inline banners you will see throughout the code line up with the major legs of the pipeline:
+
+* **`collector.py` – "=== Snapshot collection entry points ===" / "=== Domain-specific helpers ===".** Start here to understand how each feed is downloaded, cached, and normalised.  The numbered "Step" comments describe the order in which weather warnings, rainfall, AQHI, and traffic records flow from HTTP helpers into SQLite.
+* **`app.py` – "=== Interactive console front-end ===" / "=== Menu discovery helpers ===".** This file shows how the CLI orchestrates a session: parsing args, refreshing snapshots, running change detection, and presenting pandas summaries.  Follow the "Step" annotations inside `DashboardSession.refresh` and `build_aqhi_history_report` to map the control flow back to the collector terminology.
+* **`db.py` – "=== Persistence layer ===".** The comments walk through connection setup, schema creation, and the `save_*` helpers, clarifying why datetimes are stored in ISO strings and how `get_last_two` feeds the alerting logic.
+* **`alerts.py` – "=== Alerting layer ===".** Read this after `db.py` to see how `_extract_category` and `ChangeDetector.run` interpret the latest rows and emit human-friendly messages via `ConsoleMessenger`.
+
+Together, these sections form a narrated tour: app.py (front-end) calls collector.py (snapshot collection), which persists rows via db.py (persistence layer) and finally alerts.py (alerting layer) highlights changes for the console dashboard.
+
 ## Interactive console dashboard
 
 The CLI now launches an interactive dashboard.  After selecting your configuration file you can:
