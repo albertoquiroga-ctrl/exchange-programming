@@ -21,6 +21,7 @@ The CLI now launches an interactive dashboard.  After selecting your configurati
 * Press **Enter** to refresh the four tiles immediately.
 * Type **d**, **a** or **t** to switch the monitored rain district, AQHI station or traffic region using the values discovered in the bundled mock payloads.
 * Pass `--alerts` to enable Telegram change detection — tiles that triggered an alert on the last refresh are highlighted inline.
+* Review the **pandas-powered AQHI history table** that now appears under every snapshot, summarising the most recent readings, their mean/min/max and the latest change.  It makes the console demo feel closer to a mini dashboard than a set of raw HTTP calls.
 
 Example command:
 
@@ -31,6 +32,13 @@ python -m hk_monitor.app --config config.toml --alerts
 Each refresh honours `app.poll_interval` (default 300 s) before collecting the next snapshot; adjust it in `config.toml` for faster demos.
 
 Use `--collect` the first time you run the dashboard to pull an initial snapshot before entering the menu.
+
+To showcase the pandas integration in isolation, run the dedicated test:
+
+```bash
+pytest tests/test_history_summary.py -k history
+```
+This exercises the helper that builds the AQHI table so you can paste the output directly into demo slides.
 
 ## Testing and scenario scripts
 
