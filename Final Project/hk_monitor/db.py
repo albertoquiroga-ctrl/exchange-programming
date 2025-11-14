@@ -1,4 +1,10 @@
 """SQLite helpers for persisting snapshots."""
+
+# === Persistence layer ===
+
+# This module anchors the "database" leg of the pipeline.  Everything is
+# intentionally small and synchronous so the inline comments can describe every
+# logical step from connection to query.
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -41,14 +47,24 @@ class TrafficRecord:
 
 
 def init_db(db_path: Path) -> sqlite3.Connection:
+    """Create or open the SQLite database and ensure the schema exists."""
+
+    # Step 1: create the parent folder when running the first time so sqlite3
+    # does not fail with a cryptic "unable to open database" error.
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
+    # Step 2: return rows as ``sqlite3.Row`` objects so the rest of the code can
+    # access columns by name, which keeps rendering code readable.
     conn.row_factory = sqlite3.Row
     _create_tables(conn)
     return conn
 
 
 def _create_tables(conn: sqlite3.Connection) -> None:
+    """Create all snapshot tables if they do not exist."""
+
+    # Step 1: a single ``executescript`` call keeps schema management simple and
+    # ensures every dashboard run uses identical table definitions.
     cur = conn.cursor()
     cur.executescript(
         """
@@ -86,6 +102,10 @@ def _create_tables(conn: sqlite3.Connection) -> None:
 
 
 def save_warning(conn: sqlite3.Connection, record: WarningRecord) -> None:
+    """Insert a warning row while normalising timestamps."""
+
+    # ``strftime`` stores ``datetime`` objects in ISO format so ChangeDetector
+    # can compare strings lexicographically without re-parsing.
     conn.execute(
         "INSERT INTO warnings(level, message, updated_at) VALUES (?, ?, ?)",
         (record.level, record.message, record.updated_at.strftime(ISO_FORMAT)),
@@ -94,6 +114,7 @@ def save_warning(conn: sqlite3.Connection, record: WarningRecord) -> None:
 
 
 def save_rain(conn: sqlite3.Connection, record: RainRecord) -> None:
+    """Insert a rain row for the monitored district."""
     conn.execute(
         "INSERT INTO rain(district, intensity, updated_at) VALUES (?, ?, ?)",
         (record.district, record.intensity, record.updated_at.strftime(ISO_FORMAT)),
@@ -102,6 +123,7 @@ def save_rain(conn: sqlite3.Connection, record: RainRecord) -> None:
 
 
 def save_aqhi(conn: sqlite3.Connection, record: AqhiRecord) -> None:
+    """Insert an AQHI row along with the numeric value."""
     conn.execute(
         "INSERT INTO aqhi(station, category, value, updated_at) VALUES (?, ?, ?, ?)",
         (
@@ -115,6 +137,7 @@ def save_aqhi(conn: sqlite3.Connection, record: AqhiRecord) -> None:
 
 
 def save_traffic(conn: sqlite3.Connection, record: TrafficRecord) -> None:
+    """Insert a traffic row describing the latest incident."""
     conn.execute(
         "INSERT INTO traffic(severity, description, updated_at) VALUES (?, ?, ?)",
         (record.severity, record.description, record.updated_at.strftime(ISO_FORMAT)),
@@ -123,6 +146,7 @@ def save_traffic(conn: sqlite3.Connection, record: TrafficRecord) -> None:
 
 
 def _fetch_latest_two(conn: sqlite3.Connection, table: str) -> List[sqlite3.Row]:
+    """Return the newest two rows for change detection."""
     cur = conn.execute(
         f"SELECT * FROM {table} ORDER BY id DESC LIMIT 2"
     )
@@ -130,6 +154,7 @@ def _fetch_latest_two(conn: sqlite3.Connection, table: str) -> List[sqlite3.Row]
 
 
 def get_latest(conn: sqlite3.Connection) -> Dict[str, Optional[sqlite3.Row]]:
+    """Fetch the most recent row for every dashboard tile."""
     return {
         "warnings": _fetch_latest_row(conn, "warnings"),
         "rain": _fetch_latest_row(conn, "rain"),
@@ -139,16 +164,20 @@ def get_latest(conn: sqlite3.Connection) -> Dict[str, Optional[sqlite3.Row]]:
 
 
 def _fetch_latest_row(conn: sqlite3.Connection, table: str) -> Optional[sqlite3.Row]:
+    """Return the newest row for the requested table, if any."""
     cur = conn.execute(f"SELECT * FROM {table} ORDER BY id DESC LIMIT 1")
     return cur.fetchone()
 
 
 def get_last_two(conn: sqlite3.Connection, table: str) -> List[sqlite3.Row]:
+    """Public wrapper used by ChangeDetector to compare consecutive rows."""
     return _fetch_latest_two(conn, table)
 
 
 @contextmanager
 def connect(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Context manager that opens, yields, then closes the SQLite connection."""
+
     conn = init_db(db_path)
     try:
         yield conn
