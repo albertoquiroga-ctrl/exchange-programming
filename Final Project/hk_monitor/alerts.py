@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Protocol, TextIO
+from typing import Optional, Protocol, TextIO
 import logging
 import sqlite3
 import sys
@@ -51,64 +51,123 @@ class ChangeDetector:
     ):
         self.conn = conn
         self.messenger = messenger or ConsoleMessenger()
-        self.table_config: Dict[str, Callable[[sqlite3.Row], AlertMessage]] = {
-            "warnings": self._format_warning,
-            "rain": self._format_rain,
-            "aqhi": self._format_aqhi,
-            "traffic": self._format_traffic,
-        }
 
     def run(self) -> None:
-        for table, formatter in self.table_config.items():
-            rows = db.get_last_two(self.conn, table)
-            if len(rows) < 2:
-                continue
-            previous, current = rows[1], rows[0]
-            if _extract_category(previous) == _extract_category(current):
-                continue
-            alert = formatter(current)
-            alert.previous = _extract_category(previous)
-            alert.current = _extract_category(current)
-            self.messenger.send(alert)
+        self._check_warnings()
+        self._check_rain()
+        self._check_aqhi()
+        self._check_traffic()
 
-    def _format_warning(self, row: sqlite3.Row) -> AlertMessage:
-        return AlertMessage(
-            metric="Warnings",
-            previous=row["level"],
-            current=row["level"],
-            description=row["message"],
-        )
+    def _check_warnings(self) -> None:
+        rows = db.get_last_two_warnings(self.conn)
+        if len(rows) < 2:
+            return
+        previous = rows[1]
+        current = rows[0]
+        if compare_warning_rows(previous, current):
+            print_warning_alert(self.messenger, previous, current)
 
-    def _format_rain(self, row: sqlite3.Row) -> AlertMessage:
-        description = f"{row['district']}: {row['intensity']}"
-        return AlertMessage(
-            metric="Rain",
-            previous=row["intensity"],
-            current=row["intensity"],
-            description=description,
-        )
+    def _check_rain(self) -> None:
+        rows = db.get_last_two_rain(self.conn)
+        if len(rows) < 2:
+            return
+        previous = rows[1]
+        current = rows[0]
+        if compare_rain_rows(previous, current):
+            print_rain_alert(self.messenger, previous, current)
 
-    def _format_aqhi(self, row: sqlite3.Row) -> AlertMessage:
-        description = f"{row['station']} AQHI {row['value']:.1f}"
-        return AlertMessage(
-            metric="AQHI",
-            previous=row["category"],
-            current=row["category"],
-            description=description,
-        )
+    def _check_aqhi(self) -> None:
+        rows = db.get_last_two_aqhi(self.conn)
+        if len(rows) < 2:
+            return
+        previous = rows[1]
+        current = rows[0]
+        if compare_aqhi_rows(previous, current):
+            print_aqhi_alert(self.messenger, previous, current)
 
-    def _format_traffic(self, row: sqlite3.Row) -> AlertMessage:
-        return AlertMessage(
-            metric="Traffic",
-            previous=row["severity"],
-            current=row["severity"],
-            description=row["description"],
-        )
-def _extract_category(row: sqlite3.Row) -> str:
-    for key in ("category", "level", "intensity", "severity"):
-        if key in row.keys():
-            return str(row[key])
-    return ""
+    def _check_traffic(self) -> None:
+        rows = db.get_last_two_traffic(self.conn)
+        if len(rows) < 2:
+            return
+        previous = rows[1]
+        current = rows[0]
+        if compare_traffic_rows(previous, current):
+            print_traffic_alert(self.messenger, previous, current)
+
+
+def compare_warning_rows(previous: sqlite3.Row, current: sqlite3.Row) -> bool:
+    previous_level = previous["level"]
+    current_level = current["level"]
+    return str(previous_level) != str(current_level)
+
+
+def print_warning_alert(
+    messenger: Messenger, previous: sqlite3.Row, current: sqlite3.Row
+) -> None:
+    message = AlertMessage(
+        metric="Warnings",
+        previous=str(previous["level"]),
+        current=str(current["level"]),
+        description=str(current["message"]),
+    )
+    messenger.send(message)
+
+
+def compare_rain_rows(previous: sqlite3.Row, current: sqlite3.Row) -> bool:
+    previous_value = previous["intensity"]
+    current_value = current["intensity"]
+    return str(previous_value) != str(current_value)
+
+
+def print_rain_alert(
+    messenger: Messenger, previous: sqlite3.Row, current: sqlite3.Row
+) -> None:
+    description = f"{current['district']}: {current['intensity']}"
+    message = AlertMessage(
+        metric="Rain",
+        previous=str(previous["intensity"]),
+        current=str(current["intensity"]),
+        description=description,
+    )
+    messenger.send(message)
+
+
+def compare_aqhi_rows(previous: sqlite3.Row, current: sqlite3.Row) -> bool:
+    previous_value = previous["category"]
+    current_value = current["category"]
+    return str(previous_value) != str(current_value)
+
+
+def print_aqhi_alert(
+    messenger: Messenger, previous: sqlite3.Row, current: sqlite3.Row
+) -> None:
+    value_text = f"{current['value']:.1f}"
+    description = f"{current['station']} AQHI {value_text}"
+    message = AlertMessage(
+        metric="AQHI",
+        previous=str(previous["category"]),
+        current=str(current["category"]),
+        description=description,
+    )
+    messenger.send(message)
+
+
+def compare_traffic_rows(previous: sqlite3.Row, current: sqlite3.Row) -> bool:
+    previous_value = previous["severity"]
+    current_value = current["severity"]
+    return str(previous_value) != str(current_value)
+
+
+def print_traffic_alert(
+    messenger: Messenger, previous: sqlite3.Row, current: sqlite3.Row
+) -> None:
+    message = AlertMessage(
+        metric="Traffic",
+        previous=str(previous["severity"]),
+        current=str(current["severity"]),
+        description=str(current["description"]),
+    )
+    messenger.send(message)
 
 
 __all__ = ["ChangeDetector", "AlertMessage", "ConsoleMessenger", "Messenger"]

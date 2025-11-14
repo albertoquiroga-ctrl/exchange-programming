@@ -29,143 +29,338 @@ def collect_once(
 
         with connect(config.app.database_path) as connection:
             _collect(config, connection)
-            return db.get_latest(connection)
+            return db.get_latest_snapshot(connection)
     else:
         _collect(config, conn)
-        return db.get_latest(conn)
+        return db.get_latest_snapshot(conn)
 
 
 def _collect(config: Config, conn: sqlite3.Connection) -> None:
+    # Warnings: load -> filter -> normalize -> persist
     warning_record = fetch_warning(config)
-    if warning_record:
+    if warning_record is not None:
         db.save_warning(conn, warning_record)
 
+    # Rain: load -> filter -> normalize -> persist
     rain_record = fetch_rain(config)
-    if rain_record:
+    if rain_record is not None:
         db.save_rain(conn, rain_record)
 
+    # AQHI: load -> filter -> normalize -> persist
     aqhi_record = fetch_aqhi(config)
-    if aqhi_record:
+    if aqhi_record is not None:
         db.save_aqhi(conn, aqhi_record)
 
+    # Traffic: load -> filter -> normalize -> persist
     traffic_record = fetch_traffic(config)
-    if traffic_record:
+    if traffic_record is not None:
         db.save_traffic(conn, traffic_record)
 
 
 def fetch_warning(config: Config) -> db.WarningRecord | None:
-    data = _get_payload(
-        config, config.api.warnings_url, config.mocks.warnings, key="warnings"
-    )
-    details = data.get("details") or data.get("warning") or []
-    if not details:
+    # Load phase
+    payload = load_warning_payload(config)
+    if not payload:
         return None
-    chosen = details[0]
-    timestamp = _parse_time(
-        chosen.get("updateTime") or data.get("updateTime")
-    )
-    return db.WarningRecord(
-        level=chosen.get("warningStatementCode", "UNKNOWN"),
-        message=chosen.get("warningMessage", "No warning message supplied."),
-        updated_at=timestamp,
-    )
+
+    # Filter phase
+    detail = choose_warning_detail(payload)
+    if detail is None:
+        return None
+
+    # Normalize phase
+    return normalize_warning_detail(detail, payload)
 
 
 def fetch_rain(config: Config) -> db.RainRecord | None:
-    data = _get_payload(
-        config, config.api.rainfall_url, config.mocks.rainfall, key="rainfall"
-    )
-    if "data" in data:
-        rainfall_data = data.get("data", [])
-    else:
-        rainfall_data = (data.get("rainfall") or {}).get("data", [])
-    district_entry = next(
-        (row for row in rainfall_data if row.get("place") == config.app.rain_district),
-        None,
-    )
-    if not district_entry:
+    # Load phase
+    payload = load_rain_payload(config)
+    if payload is None:
         return None
-    value = float(district_entry.get("max", district_entry.get("value", 0)) or 0)
-    return db.RainRecord(
-        district=config.app.rain_district,
-        intensity=_categorize_rain(value),
-        updated_at=_parse_time(district_entry.get("recordTime") or data.get("updateTime")),
-    )
+
+    # Filter phase
+    entries = extract_rain_entries(payload)
+    district_entry = select_rain_entry(entries, config.app.rain_district)
+    if district_entry is None:
+        return None
+
+    # Normalize phase
+    return normalize_rain_entry(district_entry, payload, config.app.rain_district)
 
 
 def fetch_aqhi(config: Config) -> db.AqhiRecord | None:
-    data = _get_payload(config, config.api.aqhi_url, config.mocks.aqhi, key="aqhi")
-    if isinstance(data, list):
-        stations = data
-    else:
-        stations = data.get("aqhi") or data.get("data") or []
-    station_entry = next(
-        (row for row in stations if row.get("station") == config.app.aqhi_station),
-        None,
-    )
-    if not station_entry:
+    # Load phase
+    payload = load_aqhi_payload(config)
+    if payload is None:
         return None
-    value = float(station_entry.get("aqhi", station_entry.get("value", 0)) or 0)
-    category = (
-        station_entry.get("health_risk")
-        or station_entry.get("category")
-        or _categorize_aqhi(value)
-    )
-    publish_time = station_entry.get("publish_date") or station_entry.get("time")
-    dataset_time = None
-    if isinstance(data, dict):
-        dataset_time = data.get("publishDate") or data.get("updateTime")
-    return db.AqhiRecord(
-        station=config.app.aqhi_station,
-        category=str(category),
-        value=value,
-        updated_at=_parse_time(publish_time or dataset_time),
-    )
+
+    # Filter phase
+    stations = extract_aqhi_entries(payload)
+    station_entry = select_aqhi_station(stations, config.app.aqhi_station)
+    if station_entry is None:
+        return None
+
+    # Normalize phase
+    return normalize_aqhi_entry(station_entry, payload, config.app.aqhi_station)
 
 
 def fetch_traffic(config: Config) -> db.TrafficRecord | None:
-    data = _get_payload(
+    # Load phase
+    payload = load_traffic_payload(config)
+    if payload is None:
+        return None
+
+    # Filter phase
+    incidents = extract_traffic_entries(payload)
+    chosen = select_traffic_entry(incidents, config.app.traffic_region)
+    if chosen is None:
+        return None
+
+    # Normalize phase
+    return normalize_traffic_entry(chosen, payload)
+
+
+def load_warning_payload(config: Config) -> Dict[str, Any]:
+    return _get_payload(
+        config, config.api.warnings_url, config.mocks.warnings, key="warnings"
+    )
+
+
+def choose_warning_detail(payload: Dict[str, Any]) -> Dict[str, Any] | None:
+    details: list[Dict[str, Any]] = []
+    if "details" in payload:
+        raw_details = payload.get("details")
+        if isinstance(raw_details, list):
+            details = raw_details
+    elif "warning" in payload:
+        raw_warning = payload.get("warning")
+        if isinstance(raw_warning, list):
+            details = raw_warning
+    if not details:
+        return None
+    return details[0]
+
+
+def normalize_warning_detail(
+    detail: Dict[str, Any], payload: Dict[str, Any]
+) -> db.WarningRecord:
+    update_time = detail.get("updateTime")
+    if not update_time:
+        update_time = payload.get("updateTime")
+    level = detail.get("warningStatementCode")
+    if not level:
+        level = "UNKNOWN"
+    message = detail.get("warningMessage")
+    if not message:
+        message = "No warning message supplied."
+    return db.WarningRecord(
+        level=str(level),
+        message=str(message),
+        updated_at=_parse_time(str(update_time) if update_time else None),
+    )
+
+
+def load_rain_payload(config: Config) -> Dict[str, Any] | None:
+    payload = _get_payload(
+        config, config.api.rainfall_url, config.mocks.rainfall, key="rainfall"
+    )
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
+def extract_rain_entries(payload: Dict[str, Any]) -> list[Dict[str, Any]]:
+    entries: list[Dict[str, Any]] = []
+    if "data" in payload:
+        raw_entries = payload.get("data")
+    else:
+        rainfall_section = payload.get("rainfall")
+        if isinstance(rainfall_section, dict):
+            raw_entries = rainfall_section.get("data")
+        else:
+            raw_entries = []
+    if not isinstance(raw_entries, list):
+        raw_entries = []
+    for entry in raw_entries:
+        if isinstance(entry, dict):
+            entries.append(entry)
+    return entries
+
+
+def select_rain_entry(
+    entries: list[Dict[str, Any]], district: str
+) -> Dict[str, Any] | None:
+    for entry in entries:
+        place = entry.get("place")
+        if place == district:
+            return entry
+    return None
+
+
+def normalize_rain_entry(
+    entry: Dict[str, Any], payload: Dict[str, Any], district: str
+) -> db.RainRecord:
+    value_field = entry.get("max")
+    if value_field is None:
+        value_field = entry.get("value")
+    value_text = 0.0
+    if value_field is not None:
+        value_text = float(value_field)
+    intensity = _categorize_rain(value_text)
+    record_time = entry.get("recordTime")
+    if not record_time:
+        record_time = payload.get("updateTime")
+    return db.RainRecord(
+        district=district,
+        intensity=intensity,
+        updated_at=_parse_time(str(record_time) if record_time else None),
+    )
+
+
+def load_aqhi_payload(config: Config) -> Any:
+    return _get_payload(config, config.api.aqhi_url, config.mocks.aqhi, key="aqhi")
+
+
+def extract_aqhi_entries(payload: Any) -> list[Dict[str, Any]]:
+    entries: list[Dict[str, Any]] = []
+    if isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict):
+                entries.append(item)
+    elif isinstance(payload, dict):
+        if "aqhi" in payload:
+            raw_entries = payload.get("aqhi")
+        elif "data" in payload:
+            raw_entries = payload.get("data")
+        else:
+            raw_entries = []
+        if isinstance(raw_entries, list):
+            for item in raw_entries:
+                if isinstance(item, dict):
+                    entries.append(item)
+    return entries
+
+
+def select_aqhi_station(
+    entries: list[Dict[str, Any]], station: str
+) -> Dict[str, Any] | None:
+    for entry in entries:
+        current_station = entry.get("station")
+        if current_station == station:
+            return entry
+    return None
+
+
+def normalize_aqhi_entry(
+    entry: Dict[str, Any], payload: Any, station: str
+) -> db.AqhiRecord:
+    value_field = entry.get("aqhi")
+    if value_field is None:
+        value_field = entry.get("value")
+    value = 0.0
+    if value_field is not None:
+        value = float(value_field)
+    category = entry.get("health_risk")
+    if not category:
+        category = entry.get("category")
+    if not category:
+        category = _categorize_aqhi(value)
+    publish_time = entry.get("publish_date")
+    if not publish_time:
+        publish_time = entry.get("time")
+    dataset_time = None
+    if isinstance(payload, dict):
+        dataset_time = payload.get("publishDate")
+        if not dataset_time:
+            dataset_time = payload.get("updateTime")
+    timestamp_source = publish_time if publish_time else dataset_time
+    return db.AqhiRecord(
+        station=station,
+        category=str(category),
+        value=value,
+        updated_at=_parse_time(str(timestamp_source) if timestamp_source else None),
+    )
+
+
+def load_traffic_payload(config: Config) -> Any:
+    return _get_payload(
         config,
         config.api.traffic_url,
         config.mocks.traffic,
         key="trafficnews",
         parser=_parse_traffic_xml,
     )
-    if isinstance(data, list):
-        incidents = data
-    else:
-        incidents = data.get("trafficnews") or data.get("incidents") or []
+
+
+def extract_traffic_entries(payload: Any) -> list[Dict[str, Any]]:
+    incidents: list[Dict[str, Any]] = []
+    if isinstance(payload, list):
+        for entry in payload:
+            if isinstance(entry, dict):
+                incidents.append(entry)
+    elif isinstance(payload, dict):
+        if "trafficnews" in payload:
+            raw_incidents = payload.get("trafficnews")
+        elif "incidents" in payload:
+            raw_incidents = payload.get("incidents")
+        else:
+            raw_incidents = []
+        if isinstance(raw_incidents, list):
+            for entry in raw_incidents:
+                if isinstance(entry, dict):
+                    incidents.append(entry)
+    return incidents
+
+
+def select_traffic_entry(
+    incidents: list[Dict[str, Any]], target_region: str
+) -> Dict[str, Any] | None:
     if not incidents:
         return None
+    search_text = target_region.strip().lower()
+    if not search_text:
+        return incidents[0]
+    for entry in incidents:
+        words: list[str] = []
+        region_text = entry.get("region")
+        if region_text:
+            words.append(str(region_text))
+        location_text = entry.get("location")
+        if location_text:
+            words.append(str(location_text))
+        direction_text = entry.get("direction")
+        if direction_text:
+            words.append(str(direction_text))
+        content_text = entry.get("content")
+        if content_text:
+            words.append(str(content_text))
+        haystack = " ".join(words).lower()
+        if search_text in haystack:
+            return entry
+    return incidents[0]
 
-    target = config.app.traffic_region.strip().lower()
 
-    def _matches(entry: Dict[str, Any]) -> bool:
-        if not target:
-            return True
-        haystack = " ".join(
-            filter(
-                None,
-                [
-                    entry.get("region"),
-                    entry.get("location"),
-                    entry.get("direction"),
-                    entry.get("content"),
-                ],
-            )
-        ).lower()
-        return target in haystack
-
-    entry = next((row for row in incidents if _matches(row)), None) or incidents[0]
-    severity = entry.get("severity", entry.get("category", "info"))
-    description = entry.get("content") or entry.get("summary") or "Traffic update"
+def normalize_traffic_entry(
+    entry: Dict[str, Any], payload: Any
+) -> db.TrafficRecord:
+    severity = entry.get("severity")
+    if not severity:
+        severity = entry.get("category")
+    if not severity:
+        severity = "info"
+    description = entry.get("content")
+    if not description:
+        description = entry.get("summary")
+    if not description:
+        description = "Traffic update"
     updated = entry.get("update_time")
-    if not updated and isinstance(data, dict):
-        updated = data.get("updateTime")
+    if not updated and isinstance(payload, dict):
+        updated = payload.get("updateTime")
+    normalized_description = str(description).strip()
     return db.TrafficRecord(
-        severity=severity.title(),
-        description=description.strip(),
-        updated_at=_parse_time(updated),
+        severity=str(severity).title(),
+        description=normalized_description,
+        updated_at=_parse_time(str(updated) if updated else None),
     )
 
 
@@ -295,7 +490,11 @@ def _parse_traffic_xml(text: str) -> Dict[str, Any]:
     root = ET.fromstring(text)
     incidents = []
     for message in root.findall(".//message"):
-        payload = {child.tag.lower(): (child.text or "").strip() for child in message}
+        payload: Dict[str, Any] = {}
+        for child in message:
+            key = child.tag.lower()
+            value = child.text or ""
+            payload[key] = value.strip()
         region = (
             payload.get("district_en")
             or payload.get("direction_en")

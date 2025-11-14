@@ -122,29 +122,53 @@ def save_traffic(conn: sqlite3.Connection, record: TrafficRecord) -> None:
     conn.commit()
 
 
-def _fetch_latest_two(conn: sqlite3.Connection, table: str) -> List[sqlite3.Row]:
-    cur = conn.execute(
-        f"SELECT * FROM {table} ORDER BY id DESC LIMIT 2"
-    )
-    return list(cur.fetchall())
-
-
-def get_latest(conn: sqlite3.Connection) -> Dict[str, Optional[sqlite3.Row]]:
-    return {
-        "warnings": _fetch_latest_row(conn, "warnings"),
-        "rain": _fetch_latest_row(conn, "rain"),
-        "aqhi": _fetch_latest_row(conn, "aqhi"),
-        "traffic": _fetch_latest_row(conn, "traffic"),
-    }
-
-
-def _fetch_latest_row(conn: sqlite3.Connection, table: str) -> Optional[sqlite3.Row]:
-    cur = conn.execute(f"SELECT * FROM {table} ORDER BY id DESC LIMIT 1")
+def get_latest_warning(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
+    cur = conn.execute("SELECT * FROM warnings ORDER BY id DESC LIMIT 1")
     return cur.fetchone()
 
 
-def get_last_two(conn: sqlite3.Connection, table: str) -> List[sqlite3.Row]:
-    return _fetch_latest_two(conn, table)
+def get_latest_rain(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
+    cur = conn.execute("SELECT * FROM rain ORDER BY id DESC LIMIT 1")
+    return cur.fetchone()
+
+
+def get_latest_aqhi(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
+    cur = conn.execute("SELECT * FROM aqhi ORDER BY id DESC LIMIT 1")
+    return cur.fetchone()
+
+
+def get_latest_traffic(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
+    cur = conn.execute("SELECT * FROM traffic ORDER BY id DESC LIMIT 1")
+    return cur.fetchone()
+
+
+def get_latest_snapshot(conn: sqlite3.Connection) -> Dict[str, Optional[sqlite3.Row]]:
+    snapshot: Dict[str, Optional[sqlite3.Row]] = {}
+    snapshot["warnings"] = get_latest_warning(conn)
+    snapshot["rain"] = get_latest_rain(conn)
+    snapshot["aqhi"] = get_latest_aqhi(conn)
+    snapshot["traffic"] = get_latest_traffic(conn)
+    return snapshot
+
+
+def get_last_two_warnings(conn: sqlite3.Connection) -> List[sqlite3.Row]:
+    cur = conn.execute("SELECT * FROM warnings ORDER BY id DESC LIMIT 2")
+    return list(cur.fetchall())
+
+
+def get_last_two_rain(conn: sqlite3.Connection) -> List[sqlite3.Row]:
+    cur = conn.execute("SELECT * FROM rain ORDER BY id DESC LIMIT 2")
+    return list(cur.fetchall())
+
+
+def get_last_two_aqhi(conn: sqlite3.Connection) -> List[sqlite3.Row]:
+    cur = conn.execute("SELECT * FROM aqhi ORDER BY id DESC LIMIT 2")
+    return list(cur.fetchall())
+
+
+def get_last_two_traffic(conn: sqlite3.Connection) -> List[sqlite3.Row]:
+    cur = conn.execute("SELECT * FROM traffic ORDER BY id DESC LIMIT 2")
+    return list(cur.fetchall())
 
 
 @contextmanager
@@ -166,7 +190,14 @@ __all__ = [
     "save_rain",
     "save_aqhi",
     "save_traffic",
-    "get_latest",
-    "get_last_two",
+    "get_latest_snapshot",
+    "get_latest_warning",
+    "get_latest_rain",
+    "get_latest_aqhi",
+    "get_latest_traffic",
+    "get_last_two_warnings",
+    "get_last_two_rain",
+    "get_last_two_aqhi",
+    "get_last_two_traffic",
     "connect",
 ]
