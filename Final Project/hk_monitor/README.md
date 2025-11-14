@@ -27,6 +27,18 @@ The inline banners you will see throughout the code line up with the major legs 
 
 Together, these sections form a narrated tour: app.py (front-end) calls collector.py (snapshot collection), which persists rows via db.py (persistence layer) and finally alerts.py (alerting layer) highlights changes for the console dashboard.
 
+### Code map for students
+
+| Area | What to inspect | Why it matters |
+| --- | --- | --- |
+| Interactive session | `DashboardSession` and `MenuController` inside `app.py` | Shows how CLI arguments, refresh loops, and menu-driven overrides drive the rest of the system.  Comments labelled "Step" mirror the flow shown in `docs/architecture.md`. |
+| Snapshot collection | `collector.collect_once` and feed-specific helpers (`fetch_warning`, `fetch_rain`, `fetch_aqhi`, `fetch_traffic`) | Each helper documents the payload shape, fallback logic, and normalisation into the dataclasses from `db.py`.  Use these notes when swapping from mock JSON to live APIs. |
+| Persistence | `db.py` dataclasses plus `save_*`/`get_latest` functions | Explains how rows are stored as ISO strings and how `get_last_two` powers change detection; the docstrings double as a schema cheat sheet. |
+| Alerts & history | `alerts.ChangeDetector` and `app.build_aqhi_history_report` | Demonstrates how category comparisons trigger alerts and how pandas-style summaries are rendered in plain text for demos. |
+| Tests | `tests/test_collectors.py`, `tests/test_scenarios.py`, `tests/test_history_summary.py` | Provide executable documentation.  Each test has docstrings/comments describing the scenario so students can trace inputs → stored rows → alert output. |
+
+Use the table above as a scavenger hunt: pick an area, read the referenced code plus its inline explanations, then run `pytest -k <topic>` to reinforce the concept.
+
 ## Interactive console dashboard
 
 The CLI now launches an interactive dashboard.  After selecting your configuration file you can:
