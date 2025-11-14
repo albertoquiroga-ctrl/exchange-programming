@@ -44,3 +44,18 @@ pytest
 * `tests/test_config.py` enforces the stricter configuration validation so mistakes are caught before running the collectors.
 
 The project defaults to the bundled mock JSON payloads so everything works offline.
+
+## Presentation assets
+
+Binary attachments are mirrored as Base64 text so they stay reviewable in environments that forbid binary blobs.  Decode them with the helper script before rehearsal:
+
+```bash
+python ../tools/decode_slide_assets.py
+```
+
+The command emits the real PowerPoint deck and PNG in `../docs/slides/`, which means the rehearsal links keep working locally:
+
+* [HK Conditions Monitor slide deck (`.pptx.b64` placeholder)](../docs/slides/HK-Conditions-Monitor.pptx.b64)
+* [Architecture diagram (`.png.b64` placeholder)](../docs/slides/hk-architecture.png.b64)
+
+Once decoded, open the PPTX to walk through framing, architecture, demo steps, metrics, lessons, and next actions exactly as planned in `../docs/presentation-outline.md`.
