@@ -1,0 +1,1 @@
+"""HK Conditions Monitor package."""

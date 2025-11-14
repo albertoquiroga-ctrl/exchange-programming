@@ -1,0 +1,10 @@
+{
+  "trafficnews": [
+    {
+      "region": "Hong Kong Island",
+      "severity": "Severe",
+      "content": "Accident near Central Ferry Pier causing congestion.",
+      "update_time": "2024-07-01T12:10:00+08:00"
+    }
+  ]
+}
