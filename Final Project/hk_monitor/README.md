@@ -2,6 +2,8 @@
 
 This folder contains the reference implementation described in `Final Project/project-plan.md`.  It can run entirely on mock data for demos or switch to the real Hong Kong open-data APIs by setting `use_mock_data = false` in `config.toml`.
 
+> ✳️ **Readability redistribution:** Before touching code, skim the [Readability & Onboarding work package](../project-plan.md#9-readability--onboarding) so you know which teammate owns each redistribution, legible-rewrite, or heavy-commenting stream and how those expectations surface in this README.
+
 ## Getting started
 
 ```bash
