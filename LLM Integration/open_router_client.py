@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 import re
+from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
 import requests
 from dotenv import load_dotenv
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env", override=True)
 
 DEFAULT_MODEL = "deepseek/deepseek-r1-0528-qwen3-8b:free"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"

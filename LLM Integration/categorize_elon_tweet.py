@@ -3,14 +3,16 @@ from __future__ import annotations
 import json
 import os
 import time
+from pathlib import Path
 from textwrap import dedent
 
 import requests
 from dotenv import load_dotenv
 
-from open_router_client import ask_open_router
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env", override=True)
 
-load_dotenv()
+from open_router_client import ask_open_router
 
 DEFAULT_RAPIDAPI_URL = "https://twitter241.p.rapidapi.com/user-tweets"
 DEFAULT_RAPIDAPI_HOST = "twitter241.p.rapidapi.com"
