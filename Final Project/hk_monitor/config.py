@@ -1,4 +1,12 @@
-"""Configuration helpers for the HK Conditions Monitor project."""
+"""Configuration helpers for the HK Conditions Monitor project.
+
+Beyond simply reading ``config.toml``, this module offers the glue that keeps
+the console dashboard configurable in teaching labs where students launch the
+tool from unpredictable directories and operating systems.  Centralising all
+I/O, parsing, and validation logic here keeps the rest of the codebase focused
+on the monitoring experience itself (polling APIs, persisting readings, and
+rendering the dashboard panels).
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,7 +25,12 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for <3.11
 
 @dataclass(slots=True)
 class AppConfig:
-    """Runtime options that influence how the console dashboard behaves."""
+    """Runtime options that influence how the console dashboard behaves.
+
+    The dashboard session learns which sensors, districts, and mock switches
+    to use through this object, so every loop iteration depends on these
+    values being clean and well-typed.
+    """
 
     database_path: Path
     poll_interval: int
@@ -29,7 +42,11 @@ class AppConfig:
 
 @dataclass(slots=True)
 class ApiConfig:
-    """Endpoints for the upstream data providers."""
+    """Endpoints for the upstream data providers.
+
+    Keeping endpoints configurable allows instructors to swap in mirrors or
+    captive portals without touching the networking or parsing code.
+    """
 
     warnings_url: str
     rainfall_url: str
@@ -39,7 +56,11 @@ class ApiConfig:
 
 @dataclass(slots=True)
 class MockPaths:
-    """Filesystem locations for offline payloads used while developing."""
+    """Filesystem locations for offline payloads used while developing.
+
+    Running the CLI with ``--use-mock-data`` depends on these files existing,
+    so resolving them early avoids confusing crashes deep inside collectors.
+    """
 
     warnings: Path
     rainfall: Path
@@ -49,7 +70,12 @@ class MockPaths:
 
 @dataclass(slots=True)
 class Config:
-    """Top-level container that groups application, API, and mock settings."""
+    """Top-level container that groups application, API, and mock settings.
+
+    The rest of the HK monitor imports this single object so that the way a
+    course deploys the project (real data vs. mocks, on-disk DB locations, etc)
+    never leaks into other modules.
+    """
 
     app: AppConfig
     api: ApiConfig
@@ -62,6 +88,11 @@ class Config:
         Args:
             path: Optional path to a TOML file. Defaults to ``config.toml`` in
                 the current working directory.
+
+        The loader is intentionally defensive: it searches multiple directories,
+        auto-fixes common Windows path mistakes, and raises descriptive errors.
+        That way the CLI always starts with a sensible explanation instead of
+        exploding somewhere in the networking stack.
         """
 
         requested_path = Path(path or "config.toml")
@@ -87,6 +118,8 @@ class Config:
 def _parse_app_config(data: Dict[str, Any], base: Path) -> AppConfig:
     """Coerce and validate the [app] section from the TOML payload."""
     database_raw = _require_str(data.get("database_path", "final_project.db"), "app.database_path")
+    # Paths inside config.toml are interpreted relative to the file itself so
+    # that teams can copy the entire folder elsewhere without editing values.
     poll_interval = int(data.get("poll_interval", 300))
     # Reject zero/negative refresh intervals early rather than creating a tight
     # while loop in ``app.DashboardSession``.
@@ -105,7 +138,8 @@ def _parse_app_config(data: Dict[str, Any], base: Path) -> AppConfig:
 def _parse_api_config(data: Dict[str, Any]) -> ApiConfig:
     """Fill in API defaults while still allowing overrides in config.toml."""
     # The defaults dictionary mirrors the URLs published by HK data sources so
-    # students can boot the project without editing config.
+    # students can boot the project without editing config while still letting
+    # instructors redirect traffic through offline mirrors when needed.
     defaults = {
         "warnings_url": "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=warnsum&lang=en",
         "rainfall_url": "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=en",
@@ -163,6 +197,9 @@ def _parse_toml(text: str) -> Dict[str, Any]:
         sanitised = _normalise_windows_paths(text)
         if sanitised != text:
             try:
+                # Re-run parsing with the sanitised version. If it still fails
+                # we intentionally bubble up the original error afterwards so
+                # students can see their exact typo.
                 return tomllib.loads(sanitised)
             except tomllib.TOMLDecodeError:
                 pass

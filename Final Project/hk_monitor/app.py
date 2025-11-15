@@ -16,7 +16,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
 try:
     from . import alerts, collector, db
@@ -120,6 +120,8 @@ class DashboardSession:
             self.config.app.traffic_region,
         )
         collector.collect_once(self.config, self.conn)
+        # Reload menu choices so live payloads immediately populate the prompts.
+        self.menu.refresh_options()
         # After persistence we fetch a fresh view so display + history use
         # identical data.
         snapshot = db.get_latest(self.conn)
@@ -152,6 +154,10 @@ class MenuController:
         """Cache menu options and store a reference to the shared config."""
         self.config = config
         self._options = _load_menu_options(config)
+
+    def refresh_options(self) -> None:
+        """Reload menu choices from the latest available payloads."""
+        self._options = _load_menu_options(self.config)
 
     def prompt(self) -> bool:
         """Return True when a refresh should occur, False to exit."""
@@ -344,12 +350,41 @@ class _RecordingMessenger(ConsoleMessenger):
 def _load_menu_options(config: Config) -> Dict[str, List[str]]:
     """Build lookup tables for every dashboard selection type."""
 
-    # Precompute the dropdowns from mock data once so every menu change is fast.
     return {
-        "rain": _extract_places(config.mocks.rainfall),
-        "aqhi": _extract_aqhi_stations(config.mocks.aqhi),
-        "traffic": _extract_regions(config.mocks.traffic),
+        "rain": _build_menu_choices(config.mocks.rainfall, _extract_places),
+        "aqhi": _build_menu_choices(config.mocks.aqhi, _extract_aqhi_stations),
+        "traffic": _build_menu_choices(config.mocks.traffic, _extract_regions),
     }
+
+
+def _build_menu_choices(
+    mock_path: Path, extractor: Callable[[Path], List[str]]
+) -> List[str]:
+    """Merge bundled mock files with cached live payloads for menu prompts."""
+
+    choices: Set[str] = set()
+    for source in _menu_payload_sources(mock_path):
+        for entry in extractor(source):
+            choices.add(entry)
+    return sorted(choices)
+
+
+def _menu_payload_sources(mock_path: Path) -> Sequence[Path]:
+    """Return every file that might contain enumerated options for a feed."""
+
+    sources = [mock_path]
+    cache_path = _cached_payload_path(mock_path)
+    if cache_path != mock_path:
+        sources.append(cache_path)
+    return sources
+
+
+def _cached_payload_path(mock_path: Path) -> Path:
+    """Mirror collector cache naming so menu loading finds live payloads."""
+
+    identifier = (mock_path.stem or "payload").strip() or "payload"
+    safe = "".join(c if c.isalnum() or c in {"-", "_"} else "_" for c in identifier)
+    return mock_path.parent / f"last_{safe}.json"
 
 
 def _extract_places(path: Path) -> List[str]:
