@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import pandas as pd
 import time
 import json
 import sys
 from pathlib import Path
+from typing import Mapping, NotRequired, TypedDict
 
 from dotenv import load_dotenv
 
@@ -60,6 +63,38 @@ def gen_prompt(title):
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env", override=True)
 
+
+class FieldCategorization(TypedDict, total=False):
+    present: bool
+    value: str | None
+
+
+class CategorizationResponse(TypedDict, total=False):
+    district: NotRequired[FieldCategorization]
+    bedrooms: NotRequired[FieldCategorization]
+    size: NotRequired[FieldCategorization]
+    transportation_proximity: NotRequired[FieldCategorization]
+    attraction_proximity: NotRequired[FieldCategorization]
+    view: NotRequired[FieldCategorization]
+
+
+def _extract_field_values(
+    field_result: Mapping[str, object] | None,
+) -> tuple[bool | None, str | None]:
+    """Return normalized present/value pairs for a single field."""
+
+    if not isinstance(field_result, Mapping):
+        return None, None
+
+    present_value = field_result.get("present")
+    normalized_present = present_value if isinstance(present_value, bool) else None
+
+    value_entry = field_result.get("value")
+    normalized_value = value_entry if isinstance(value_entry, str) or value_entry is None else None
+
+    return normalized_present, normalized_value
+
+
 from open_router_client import ask_open_router
 LISTINGS_CSV = BASE_DIR / 'listings.csv'
 OUTPUT_SAMPLE = BASE_DIR / 'categorized_listings_sample.csv'
@@ -116,7 +151,7 @@ def _is_rate_limit_error(message: str) -> bool:
     return "429" in lowered or "rate limit" in lowered
 
 
-def _fetch_categorization(prompt: str):
+def _fetch_categorization(prompt: str) -> CategorizationResponse:
     """Call OpenRouter and retry automatically when it is temporarily rate-limited."""
     attempts = MAX_RATE_LIMIT_RETRIES + 1  # initial try + retries
     for attempt in range(1, attempts + 1):
@@ -163,13 +198,11 @@ for idx, row in df.head(20).iterrows():
     # Update DataFrame columns with LLM outputs for this row
     for field, (present_col, value_col) in CATEGORIZATION_FIELDS.items():
         field_result = result.get(field)
-        if isinstance(field_result, dict):
-            df.at[idx, present_col] = field_result.get("present")
-            df.at[idx, value_col] = field_result.get("value")
-        else:
-            # Guard against malformed responses so we can keep processing rows.
-            df.at[idx, present_col] = None
-            df.at[idx, value_col] = None
+        normalized_present, normalized_value = _extract_field_values(field_result)
+
+        # Guard against malformed responses so we can keep processing rows.
+        df.at[idx, present_col] = normalized_present
+        df.at[idx, value_col] = normalized_value
 
 
     time.sleep(10)
