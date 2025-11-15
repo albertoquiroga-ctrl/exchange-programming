@@ -16,6 +16,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
 try:
@@ -34,6 +35,14 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
 )
+
+DEFAULT_TRAFFIC_REGIONS = [
+    "Hong Kong Island",
+    "Kowloon",
+    "New Territories",
+    "Lantau Island",
+    "Islands District",
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,6 +82,14 @@ def main() -> None:
         dashboard.run(skip_initial_refresh=args.collect)
 
 
+class MenuAction(Enum):
+    """Possible outcomes from the menu prompt."""
+
+    REFRESH = "refresh"
+    WAIT = "wait"
+    EXIT = "exit"
+
+
 class DashboardSession:
     """Coordinate refreshes, prompts, and optional alerting."""
 
@@ -101,8 +118,11 @@ class DashboardSession:
                     self.refresh()
                 else:
                     skip_refresh = False
-                if not self.menu.prompt():
+                action = self.menu.prompt()
+                if action is MenuAction.EXIT:
                     break
+                if action is MenuAction.REFRESH:
+                    continue
                 # Defensive clamp so a student entering "-5" never crashes the loop.
                 wait_seconds = max(0, int(self.config.app.poll_interval))
                 if wait_seconds:
@@ -159,29 +179,40 @@ class MenuController:
         """Reload menu choices from the latest available payloads."""
         self._options = _load_menu_options(self.config)
 
-    def prompt(self) -> bool:
-        """Return True when a refresh should occur, False to exit."""
+    def prompt(self) -> MenuAction:
+        """Run the input loop and return the chosen dashboard action."""
 
-        menu_text = "Press Enter to refresh now, or choose: [d]istrict, [a]qhi, [t]raffic, [q]uit"
+        menu_text = (
+            "Press Enter to refresh now, or choose: "
+            "[d]istrict, [a]qhi, [t]raffic, [w]ait, [q]uit"
+        )
         while True:
             # Keep prompting until the user either selects an action or exits;
             # any blank input triggers an immediate refresh.
             try:
                 choice = input(f"{menu_text}\n> ").strip().lower()
             except EOFError:
-                return False
+                return MenuAction.EXIT
             if choice in ("", "r"):
-                return True
+                return MenuAction.REFRESH
             if choice == "q":
-                return False
+                return MenuAction.EXIT
+            if choice == "w":
+                return MenuAction.WAIT
             if choice == "d":
-                self._change_selection("rain", "rain district", "rain_district")
+                changed = self._change_selection("rain", "rain district", "rain_district")
+                if changed and self._confirm_refresh():
+                    return MenuAction.REFRESH
                 continue
             if choice == "a":
-                self._change_selection("aqhi", "AQHI station", "aqhi_station")
+                changed = self._change_selection("aqhi", "AQHI station", "aqhi_station")
+                if changed and self._confirm_refresh():
+                    return MenuAction.REFRESH
                 continue
             if choice == "t":
-                self._change_selection("traffic", "traffic region", "traffic_region")
+                changed = self._change_selection("traffic", "traffic region", "traffic_region")
+                if changed and self._confirm_refresh():
+                    return MenuAction.REFRESH
                 continue
             print("Unknown command. Please choose one of the listed options.")
 
@@ -200,7 +231,7 @@ class MenuController:
         option_key: str,
         label: str,
         attribute: str,
-    ) -> None:
+    ) -> bool:
         """Prompt for a new menu selection and update the config in-place."""
         # Some feeds have a known set of choices, so offer numbered menus first
         # and fall back to manual text entry when mock data is unavailable.
@@ -213,23 +244,39 @@ class MenuController:
                 f"Select a new {label} (number) or press Enter to keep current: "
             ).strip()
             if not selection:
-                return
+                return False
             try:
                 index = int(selection) - 1
             except ValueError:
                 print("Invalid selection, keeping current value.")
-                return
+                return False
             if 0 <= index < len(options):
                 new_value = options[index]
+                if new_value == current_value:
+                    print(f"{label.title()} unchanged.")
+                    return False
                 setattr(self.config.app, attribute, new_value)
                 print(f"Updated {label} to {new_value}.")
+                return True
             else:
                 print("Selection out of range, keeping current value.")
+                return False
         else:
             manual = input(f"Type a new {label} and press Enter (blank to cancel): ").strip()
             if manual:
+                if manual == current_value:
+                    print(f"{label.title()} unchanged.")
+                    return False
                 setattr(self.config.app, attribute, manual)
                 print(f"Updated {label} to {manual}.")
+                return True
+        return False
+
+    @staticmethod
+    def _confirm_refresh() -> bool:
+        """Ask whether a change should trigger an immediate refresh."""
+        response = input("Refresh now? [y/N]: ").strip().lower()
+        return response in {"y", "yes"}
 
     @staticmethod
     def _print_options(options: Sequence[str]) -> None:
@@ -351,9 +398,19 @@ def _load_menu_options(config: Config) -> Dict[str, List[str]]:
     """Build lookup tables for every dashboard selection type."""
 
     return {
-        "rain": _build_menu_choices(config.mocks.rainfall, _extract_places),
-        "aqhi": _build_menu_choices(config.mocks.aqhi, _extract_aqhi_stations),
-        "traffic": _build_menu_choices(config.mocks.traffic, _extract_regions),
+        "rain": _ensure_menu_choices(
+            _build_menu_choices(config.mocks.rainfall, _extract_places),
+            config.app.rain_district,
+        ),
+        "aqhi": _ensure_menu_choices(
+            _build_menu_choices(config.mocks.aqhi, _extract_aqhi_stations),
+            config.app.aqhi_station,
+        ),
+        "traffic": _ensure_menu_choices(
+            _build_menu_choices(config.mocks.traffic, _extract_regions),
+            config.app.traffic_region,
+            fallback=DEFAULT_TRAFFIC_REGIONS,
+        ),
     }
 
 
@@ -367,6 +424,34 @@ def _build_menu_choices(
         for entry in extractor(source):
             choices.add(entry)
     return sorted(choices)
+
+
+def _ensure_menu_choices(
+    options: Sequence[str],
+    current_value: Optional[str],
+    fallback: Optional[Sequence[str]] = None,
+) -> List[str]:
+    """Ensure menus always have usable options and include the current selection."""
+
+    combined: List[str] = list(options)
+    if fallback:
+        combined.extend(fallback)
+    if current_value:
+        combined.append(current_value)
+    return _dedupe_preserve_order(combined)
+
+
+def _dedupe_preserve_order(values: Sequence[str]) -> List[str]:
+    """Remove duplicates from a sequence while keeping the first occurrence."""
+
+    seen: Set[str] = set()
+    ordered: List[str] = []
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
 
 
 def _menu_payload_sources(mock_path: Path) -> Sequence[Path]:
