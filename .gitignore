@@ -4,3 +4,9 @@ Final Project/docs/slides/hk-architecture.png
 
 # Ignore generated payload caches written during tests/demo runs
 **/last_*.json
+
+# Ignore local environment files with API keys and secrets
+.env
+.env.*
+*/.env
+*/.env.*

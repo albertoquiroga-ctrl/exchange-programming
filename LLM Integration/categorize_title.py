@@ -63,6 +63,8 @@ load_dotenv(BASE_DIR / ".env", override=True)
 from open_router_client import ask_open_router
 LISTINGS_CSV = BASE_DIR / 'listings.csv'
 OUTPUT_SAMPLE = BASE_DIR / 'categorized_listings_sample.csv'
+MAX_RATE_LIMIT_RETRIES = 4
+RATE_LIMIT_BACKOFF_SECONDS = 20
 
 df = pd.read_csv(LISTINGS_CSV, header=0, dtype={'id': str}, index_col='id')
 
@@ -94,17 +96,47 @@ def _handle_open_router_failure(error: Exception) -> None:
     sys.exit(1)
 
 
+def _is_rate_limit_error(message: str) -> bool:
+    lowered = message.lower()
+    return "429" in lowered or "rate limit" in lowered
+
+
+def _fetch_categorization(prompt: str):
+    """Call OpenRouter and retry automatically when it is temporarily rate-limited."""
+    attempts = MAX_RATE_LIMIT_RETRIES + 1  # initial try + retries
+    for attempt in range(1, attempts + 1):
+        try:
+            return ask_open_router(prompt)
+        except RuntimeError as exc:
+            message = str(exc)
+            if _is_rate_limit_error(message):
+                if attempt == attempts:
+                    break
+                wait_seconds = RATE_LIMIT_BACKOFF_SECONDS * attempt
+                print(
+                    "OpenRouter rate limit encountered. "
+                    f"Attempt {attempt}/{attempts}. "
+                    f"Retrying in {wait_seconds} seconds..."
+                )
+                time.sleep(wait_seconds)
+                continue
+            _handle_open_router_failure(exc)
+        except ValueError as exc:
+            print("Received an invalid JSON payload from OpenRouter:")
+            print(str(exc))
+            sys.exit(1)
+
+    print(
+        "OpenRouter kept returning rate limit responses. "
+        "Please try again later or configure a different MODEL in .env."
+    )
+    sys.exit(1)
+
+
 for idx, row in df.head(20).iterrows():
     title = row['name']
     prompt = gen_prompt(title)
-    try:
-        result = ask_open_router(prompt)
-    except RuntimeError as exc:
-        _handle_open_router_failure(exc)
-    except ValueError as exc:
-        print("Received an invalid JSON payload from OpenRouter:")
-        print(str(exc))
-        sys.exit(1)
+    result = _fetch_categorization(prompt)
 
     # Update DataFrame columns with LLM outputs for this row
     if "district" in result:
