@@ -80,6 +80,21 @@ new_columns = [
 for col in new_columns:
     df[col] = None
 
+CATEGORIZATION_FIELDS = {
+    "district": ("district_present", "district_value"),
+    "bedrooms": ("bedrooms_present", "bedrooms_value"),
+    "size": ("size_present", "size_value"),
+    "transportation_proximity": (
+        "transportation_proximity_present",
+        "transportation_proximity_value",
+    ),
+    "attraction_proximity": (
+        "attraction_proximity_present",
+        "attraction_proximity_value",
+    ),
+    "view": ("view_present", "view_value"),
+}
+
 
 def _handle_open_router_failure(error: Exception) -> None:
     """Provide actionable feedback when the OpenRouter request fails."""
@@ -138,25 +153,23 @@ for idx, row in df.head(20).iterrows():
     prompt = gen_prompt(title)
     result = _fetch_categorization(prompt)
 
+    if not isinstance(result, dict):
+        print(
+            f"Skipping listing {idx} because the model returned "
+            f"{type(result).__name__} instead of an object: {result!r}"
+        )
+        continue
+
     # Update DataFrame columns with LLM outputs for this row
-    if "district" in result:
-        df.at[idx, 'district_present'] = result["district"]["present"]
-        df.at[idx, 'district_value'] = result["district"]["value"]
-    if "bedrooms" in result:
-        df.at[idx, 'bedrooms_present'] = result["bedrooms"]["present"]
-        df.at[idx, 'bedrooms_value'] = result["bedrooms"]["value"]
-    if "size" in result:
-        df.at[idx, 'size_present'] = result["size"]["present"]
-        df.at[idx, 'size_value'] = result["size"]["value"]
-    if "transportation_proximity" in result:
-        df.at[idx, 'transportation_proximity_present'] = result["transportation_proximity"]["present"]
-        df.at[idx, 'transportation_proximity_value'] = result["transportation_proximity"]["value"]
-    if "attraction_proximity" in result:
-        df.at[idx, 'attraction_proximity_present'] = result["attraction_proximity"]["present"]
-        df.at[idx, 'attraction_proximity_value'] = result["attraction_proximity"]["value"]
-    if "view" in result:
-        df.at[idx, 'view_present'] = result["view"]["present"]
-        df.at[idx, 'view_value'] = result["view"]["value"]
+    for field, (present_col, value_col) in CATEGORIZATION_FIELDS.items():
+        field_result = result.get(field)
+        if isinstance(field_result, dict):
+            df.at[idx, present_col] = field_result.get("present")
+            df.at[idx, value_col] = field_result.get("value")
+        else:
+            # Guard against malformed responses so we can keep processing rows.
+            df.at[idx, present_col] = None
+            df.at[idx, value_col] = None
 
 
     time.sleep(10)
