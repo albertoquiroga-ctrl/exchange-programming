@@ -1,31 +1,28 @@
+from openai import OpenAI
+from dotenv import load_dotenv
 import os
 
-from open_router_client import build_open_router_client
+load_dotenv()
+OPEN_ROUTER_API_KEY = os.getenv("OPEN_ROUTER_API_KEY")
 
-DEFAULT_MODEL = "deepseek/deepseek-r1-0528-qwen3-8b:free"
 
+client = OpenAI(
+  base_url="https://openrouter.ai/api/v1",
+  api_key=OPEN_ROUTER_API_KEY,
+)
 
-def main() -> None:
-    try:
-        client = build_open_router_client()
-    except RuntimeError as err:
-        print(f"Configuration error: {err}")
-        return
-
-    model = os.getenv("OPEN_ROUTER_MODEL") or DEFAULT_MODEL
-
-    completion = client.chat.completions.create(
-        extra_body={},
-        model=model,
-        messages=[
-            {
+completion = client.chat.completions.create(
+#   extra_headers={
+#     "HTTP-Referer": "<YOUR_SITE_URL>", # Optional. Site URL for rankings on openrouter.ai.
+#     "X-Title": "<YOUR_SITE_NAME>", # Optional. Site title for rankings on openrouter.ai.
+#   },
+  extra_body={},
+  model="deepseek/deepseek-r1-0528-qwen3-8b:free",
+  messages=[
+              {
                 "role": "user",
                 "content": "What is the meaning of life?"
-            }
-        ]
-    )
-    print(completion.choices[0].message.content)
-
-
-if __name__ == "__main__":
-    main()
+              }
+            ]
+)
+print(completion.choices[0].message.content)

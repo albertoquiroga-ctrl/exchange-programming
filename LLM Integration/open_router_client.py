@@ -1,35 +1,12 @@
-from __future__ import annotations
-
-import json
-import os
-import re
-from typing import Any
-
-from dotenv import load_dotenv
 from openai import OpenAI
+import json
+import re
+from dotenv import load_dotenv
+import os
 
 load_dotenv()
-
-DEFAULT_MODEL = "deepseek/deepseek-r1-0528-qwen3-8b:free"
-
-
-def _get_env_api_key(override: str | None = None) -> str:
-    """
-    Return a usable OpenRouter API key from the provided override or the environment.
-    """
-    api_key = override or os.getenv("OPEN_ROUTER_API_KEY")
-    if not api_key:
-        raise RuntimeError(
-            "OpenRouter API key missing. Set OPEN_ROUTER_API_KEY in your environment or .env file."
-        )
-    return api_key
-
-
-def build_open_router_client(api_key: str | None = None) -> OpenAI:
-    """
-    Create a configured OpenAI client that speaks to OpenRouter.
-    """
-    return OpenAI(base_url="https://openrouter.ai/api/v1", api_key=_get_env_api_key(api_key))
+OPEN_ROUTER_API_KEY = os.getenv("OPEN_ROUTER_API_KEY")
+MODEL = os.getenv("MODEL")
 
 
 def _extract_first_balanced_json_object(text: str) -> str | None:
@@ -108,15 +85,14 @@ def _parse_json_from_text(text: str) -> dict:
     raise ValueError(f"Failed to parse JSON object from response. Preview:\n{preview}")
 
 
-def ask_open_router(prompt: str, *, model: str | None = None, api_key: str | None = None) -> dict[str, Any]:
-    """
-    Send a prompt to OpenRouter and return the parsed JSON response.
-    """
-    client = build_open_router_client(api_key)
-    chosen_model = model or os.getenv("OPEN_ROUTER_MODEL") or DEFAULT_MODEL
+def ask_open_router(prompt, model=MODEL, api_key=OPEN_ROUTER_API_KEY):
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+    )
     completion = client.chat.completions.create(
         extra_body={},
-        model=chosen_model,
+        model=model,
         messages=[
             {
                 "role": "user",
