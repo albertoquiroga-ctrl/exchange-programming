@@ -14,6 +14,8 @@ load_dotenv(BASE_DIR / ".env", override=True)
 
 DEFAULT_MODEL = "deepseek/deepseek-r1-0528-qwen3-8b:free"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_APP_TITLE = "Elon Tweet Categorizer"
+DEFAULT_HTTP_REFERER = "https://exchange-programming.local"
 
 
 def _require_env_var(name: str) -> str:
@@ -30,6 +32,8 @@ def _require_env_var(name: str) -> str:
 OPEN_ROUTER_API_KEY = _require_env_var("OPEN_ROUTER_API_KEY")
 MODEL = os.getenv("MODEL") or DEFAULT_MODEL
 API_BASE_URL = os.getenv("OPEN_ROUTER_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+APP_TITLE = os.getenv("OPEN_ROUTER_APP_TITLE", DEFAULT_APP_TITLE)
+APP_HTTP_REFERER = os.getenv("OPEN_ROUTER_HTTP_REFERER", DEFAULT_HTTP_REFERER)
 
 
 def _extract_first_balanced_json_object(text: str) -> str | None:
@@ -119,12 +123,17 @@ def _post_chat_completion(
     payload: Dict[str, Any] = {"model": model, "messages": list(messages)}
     if extra_body:
         payload.update(extra_body)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "X-Title": APP_TITLE,
+    }
+    if APP_HTTP_REFERER:
+        headers["HTTP-Referer"] = APP_HTTP_REFERER
+
     response = requests.post(
         f"{API_BASE_URL}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=headers,
         json=payload,
         timeout=60,
     )

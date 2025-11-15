@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from textwrap import dedent
@@ -11,6 +12,10 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env", override=True)
+
+if hasattr(sys.stdout, "reconfigure"):
+    # Windows console defaults to cp1252; ensure UTF-8 output for emoji-heavy tweets.
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
 from open_router_client import ask_open_router
 
