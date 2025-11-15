@@ -1,81 +1,147 @@
-import requests
+from __future__ import annotations
+
+import json
+import os
 import time
+from textwrap import dedent
+
+import requests
+from dotenv import load_dotenv
+
 from open_router_client import ask_open_router
 
-def gen_prompt(content):
-    return f'''
+load_dotenv()
+
+DEFAULT_RAPIDAPI_URL = "https://twitter241.p.rapidapi.com/user-tweets"
+DEFAULT_RAPIDAPI_HOST = "twitter241.p.rapidapi.com"
+RAPIDAPI_URL = os.getenv("RAPIDAPI_URL", DEFAULT_RAPIDAPI_URL)
+RAPIDAPI_HOST = os.getenv("RAPIDAPI_HOST", DEFAULT_RAPIDAPI_HOST)
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
+DEFAULT_SLEEP_SECONDS = 10
+DEFAULT_USER_ID = "44196397"
+DEFAULT_TWEET_COUNT = 20
+
+
+def _require_rapidapi_key() -> str:
+    if not RAPIDAPI_KEY:
+        raise RuntimeError(
+            "Missing RAPIDAPI_KEY. Update your .env file with RapidAPI credentials."
+        )
+    return RAPIDAPI_KEY
+
+
+def gen_prompt(content: str) -> str:
+    """Create the categorisation prompt for a single tweet."""
+    prompt = f"""
         You are an expert annotator analyzing individual tweets by Elon Musk.
 
-Tweet:
-{content}
+        Tweet:
+        {content}
 
-Your tasks:
+        Your tasks:
 
-1. Assign the tweet to exactly ONE of the following categories (choose the best fit):
-   - "Tesla"                  – anything about Tesla, its products, stock, management, factories, etc.
-   - "SpaceX"                 – rockets, Starship, Starlink, launches, satellites, etc.
-   - "X"                      – X (formerly Twitter), product features, policies, moderation, company issues.
-   - "xAI / Grok"             – xAI, Grok, AI model capabilities, AI safety comments tied to xAI.
-   - "Other Elon Musk Company"– Neuralink, The Boring Company, SolarCity, OpenAI (historical), or other Musk ventures not covered above.
-   - "US Politics"            – US government, elections, US politicians, US political parties, US public policy.
-   - "Global Politics"        – non-US governments, geopolitics, wars, diplomacy, global policy issues.
-   - "Cryptocurrency"         – Bitcoin, Dogecoin, other coins, crypto markets, blockchain talk.
-   - "Fun or Entertainment"   – memes, jokes, casual banter, movies, games, random internet fun.
-   - "Freedom of Speech"      - Anything related to fighting freedom of speech
-   - "Other / General"        – anything that doesn’t clearly fit into the above (e.g. personal reflections, generic tech talk, random comments).
+        1. Assign the tweet to exactly one of the following categories:
+           - "Tesla": Tesla products, stock, management, factories, etc.
+           - "SpaceX": rockets, Starship, Starlink, launches, satellites, etc.
+           - "X": X (formerly Twitter) features, policies, moderation, or company issues.
+           - "xAI / Grok": xAI, Grok, AI capabilities, AI safety tied to xAI.
+           - "Other Elon Musk Company": Neuralink, The Boring Company, SolarCity, etc.
+           - "US Politics": US government, elections, politicians, political parties, policies.
+           - "Global Politics": non-US governments, geopolitics, wars, diplomacy, policy issues.
+           - "Cryptocurrency": Bitcoin, Dogecoin, other coins, crypto markets, blockchain talk.
+           - "Fun or Entertainment": memes, jokes, casual banter, movies, games, random fun.
+           - "Freedom of Speech": defending or debating freedom of speech.
+           - "Other / General": anything that does not clearly fit the categories above.
 
-2. Determine the sentiment of the tweet **within that category**:
-   - "positive"
-   - "negative"
-   - "neutral"
+        2. Determine the sentiment of the tweet within that category:
+           - "positive"
+           - "negative"
+           - "neutral"
 
-Guidelines:
-- Base your decision ONLY on the tweet content provided.
-- If the tweet seems to touch multiple areas, pick the **single most central** topic.
-- Consider sarcasm or jokes when inferring sentiment, but do not over-interpret beyond what is reasonable from the text.
+        Guidelines:
+        - Base your decision ONLY on the tweet content provided.
+        - If the tweet touches multiple areas, pick the single most central topic.
+        - Consider sarcasm or jokes, but do not over-interpret beyond the text.
 
-Output **only** valid JSON in this format:
-
-{{
-  "category": "<one of the categories above>",
-  "sentiment": "positive" | "negative" | "neutral",
-  "reason": "<very short explanation of why you chose this category and sentiment>"
-}}
-    '''
-
-
-
-url = "https://twitter241.p.rapidapi.com/user-tweets"
-
-querystring = {"user":"44196397","count":"20"}
-
-headers = {
-	"x-rapidapi-key": "3cd811471cmsh7102d1f81e51a80p140b13jsnb18dbf2fecaa",
-	"x-rapidapi-host": "twitter241.p.rapidapi.com"
-}
-
-response = requests.get(url, headers=headers, params=querystring)
-
-data = response.json()
-
-posts = data['result']['timeline']['instructions'][-1]["entries"]
+        Output only valid JSON in this exact format:
+        {{
+          "category": "<one of the categories above>",
+          "sentiment": "positive" | "negative" | "neutral",
+          "reason": "<very short explanation of why you chose this category and sentiment>"
+        }}
+    """
+    return dedent(prompt).strip()
 
 
-for post in posts:
+def fetch_elon_tweets(
+    user_id: str = DEFAULT_USER_ID,
+    count: int = DEFAULT_TWEET_COUNT,
+) -> list[str]:
+    """Fetch the latest tweets for the provided user via RapidAPI."""
+    headers = {
+        "x-rapidapi-key": _require_rapidapi_key(),
+        "x-rapidapi-host": RAPIDAPI_HOST,
+    }
+    params = {"user": user_id, "count": str(count)}
     try:
-        content = post['content']['itemContent']['tweet_results']['result']['legacy']['full_text']
-        prompt = gen_prompt(content)
-        result = ask_open_router(prompt)
-        print(content)
-        print(f"LLM Response: {result}")
+        response = requests.get(
+            RAPIDAPI_URL,
+            headers=headers,
+            params=params,
+            timeout=30,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:  # noqa: PERF203 - clarity first
+        raise RuntimeError(f"Failed to fetch tweets from RapidAPI: {exc}") from exc
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise RuntimeError("RapidAPI returned an invalid JSON payload.") from exc
+
+    instructions = data.get("result", {}).get("timeline", {}).get("instructions", [])
+    tweets: list[str] = []
+    for instruction in instructions:
+        entries = instruction.get("entries") or []
+        for entry in entries:
+            tweet_text = (
+                entry.get("content", {})
+                .get("itemContent", {})
+                .get("tweet_results", {})
+                .get("result", {})
+                .get("legacy", {})
+                .get("full_text")
+            )
+            if tweet_text:
+                tweets.append(tweet_text)
+
+    if not tweets:
+        raise RuntimeError("RapidAPI response did not include any tweet text.")
+
+    return tweets
+
+
+def categorize_tweet(content: str) -> dict:
+    """Send a single tweet to the LLM and parse the JSON result."""
+    prompt = gen_prompt(content)
+    return ask_open_router(prompt)
+
+
+def main() -> None:
+    tweets = fetch_elon_tweets()
+    for idx, tweet in enumerate(tweets, start=1):
+        print(f"Tweet #{idx}:")
+        print(tweet)
+        try:
+            result = categorize_tweet(tweet)
+            print("LLM Response:")
+            print(json.dumps(result, indent=2))
+        except Exception as exc:  # noqa: BLE001 - keep the script running
+            print(f"Error while categorizing tweet: {exc}")
         print("-" * 40)
-    except KeyError as e:
-        pass
-        #print(f"Error getting twitter content: {e}")
-    except Exception as e:
-        pass
-        #print(f"Error while categorizing tweet: {e}")
-
-    time.sleep(10)
+        if idx < len(tweets):
+            time.sleep(DEFAULT_SLEEP_SECONDS)
 
 
+if __name__ == "__main__":
+    main()
