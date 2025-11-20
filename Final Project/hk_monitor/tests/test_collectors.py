@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import io
 
@@ -27,7 +26,7 @@ def test_fetch_warning_from_mock():
 def test_collect_once_persists(tmp_path):
     # Smoke test that verifies every feed saves at least one row into SQLite.
     config = _load_config()
-    config.app = replace(config.app, database_path=tmp_path / "test.db")
+    config.app.database_path = tmp_path / "test.db"
     with db.connect(config.app.database_path) as conn:
         snapshot = collector.collect_once(config, conn)
         assert snapshot["warnings"] is not None
@@ -37,7 +36,7 @@ def test_collect_once_persists(tmp_path):
 def test_change_detector_emits_alert_on_category_change(tmp_path):
     # Simulate a warning upgrade and ensure the messenger captures it.
     config = _load_config()
-    config.app = replace(config.app, database_path=tmp_path / "test.db")
+    config.app.database_path = tmp_path / "test.db"
     with db.connect(config.app.database_path) as conn:
         older = {
             "level": "TC3",
@@ -67,7 +66,7 @@ def test_fetch_warning_uses_cached_payload_on_http_failure(monkeypatch):
     assert baseline is not None
 
     failing_config = _load_config()
-    failing_config.app = replace(failing_config.app, use_mock_data=False)
+    failing_config.app.use_mock_data = False
 
     load_calls: dict[str, Path] = {}
     original_loader = collector._load_cached_payload
