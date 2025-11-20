@@ -39,11 +39,11 @@ def test_change_detector_emits_alert_on_category_change(tmp_path):
     config = _load_config()
     config.app = replace(config.app, database_path=tmp_path / "test.db")
     with db.connect(config.app.database_path) as conn:
-        older = db.WarningRecord(
-            level="TC3",
-            message="Strong wind expected",
-            updated_at=datetime.now(timezone.utc) - timedelta(hours=1),
-        )
+        older = {
+            "level": "TC3",
+            "message": "Strong wind expected",
+            "updated_at": datetime.now(timezone.utc) - timedelta(hours=1),
+        }
         newer = db.WarningRecord(
             level="TC8",
             message="Typhoon signal 8",

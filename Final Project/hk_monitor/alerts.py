@@ -9,8 +9,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Protocol, Sequence, TextIO
+from typing import Optional, TextIO
 from pathlib import Path
 import logging
 import sqlite3
@@ -28,14 +27,14 @@ except ImportError:  # pragma: no cover - allow running as a script
 logger = logging.getLogger(__name__)
 
 
-@dataclass(slots=True)
 class AlertMessage:
     """Structured alert that captures the metric and the before/after states."""
 
-    metric: str
-    previous: str
-    current: str
-    description: str
+    def __init__(self, metric: str, previous: str, current: str, description: str):
+        self.metric = metric
+        self.previous = previous
+        self.current = current
+        self.description = description
 
     def format(self) -> str:
         """Return a printable, two-line alert message."""
@@ -46,12 +45,11 @@ class AlertMessage:
         return f"{header}\n{self.description}"
 
 
-class Messenger(Protocol):
-    """Simple protocol describing objects that can receive alert messages."""
+class Messenger:
+    """Simple interface describing objects that can receive alert messages."""
 
-    def send(self, message: AlertMessage) -> None:
-        """Push a fully formatted alert to the downstream transport."""
-        ...
+    def send(self, message: AlertMessage) -> None:  # pragma: no cover - interface
+        raise NotImplementedError
 
 
 class ConsoleMessenger:
@@ -80,7 +78,7 @@ class ChangeDetector:
         self.conn = conn
         self.messenger = messenger or ConsoleMessenger()
         # The formatters convert raw sqlite rows into consistent AlertMessages.
-        self.table_config: Dict[str, Callable[[sqlite3.Row], AlertMessage]] = {
+        self.table_config = {
             "warnings": self._format_warning,
             "rain": self._format_rain,
             "aqhi": self._format_aqhi,
@@ -165,8 +163,11 @@ def _extract_category(row: sqlite3.Row) -> str:
     return ""
 
 
-def _print_snapshot(snapshot: Dict[str, Optional[sqlite3.Row]]) -> None:
+def _print_snapshot(snapshot) -> None:
     """Print the freshest readings so the CLI is still informative without alerts."""
+
+    # ``snapshot`` is expected to be a mapping with "warnings", "rain",
+    # "aqhi", and "traffic" keys pointing to sqlite3.Row objects or ``None``.
 
     # Showing the latest values keeps the terminal output useful even when
     # nothing triggered, so students can confirm the ingestion pipeline works.
@@ -182,7 +183,7 @@ def _print_snapshot(snapshot: Dict[str, Optional[sqlite3.Row]]) -> None:
     _print_section("Traffic", _describe_traffic(snapshot.get("traffic")))
 
 
-def _describe_warning(row: Optional[sqlite3.Row]) -> str:
+def _describe_warning(row) -> str:
     if not row:
         return "No warning data available."
     # Joining the lines here produces a friendly paragraph for the CLI snapshot.
@@ -193,7 +194,7 @@ def _describe_warning(row: Optional[sqlite3.Row]) -> str:
     )
 
 
-def _describe_rain(row: Optional[sqlite3.Row]) -> str:
+def _describe_rain(row) -> str:
     if not row:
         return "No rain data available."
     # Rain sections emphasize geography because alerts are location specific.
@@ -204,7 +205,7 @@ def _describe_rain(row: Optional[sqlite3.Row]) -> str:
     )
 
 
-def _describe_aqhi(row: Optional[sqlite3.Row]) -> str:
+def _describe_aqhi(row) -> str:
     if not row:
         return "No AQHI data available."
     # Format numeric AQHI with one decimal place just like the government feed.
@@ -216,7 +217,7 @@ def _describe_aqhi(row: Optional[sqlite3.Row]) -> str:
     )
 
 
-def _describe_traffic(row: Optional[sqlite3.Row]) -> str:
+def _describe_traffic(row) -> str:
     if not row:
         return "No traffic data available."
     # Traffic incidents often supply a short paragraph, so we trust the source.
@@ -227,7 +228,7 @@ def _describe_traffic(row: Optional[sqlite3.Row]) -> str:
     )
 
 
-def main(argv: Optional[Sequence[str]] = None) -> None:
+def main(argv=None) -> None:
     """Entry point for running the change detector as a standalone script."""
 
     # Standard argparse usage so the script can be customised from the CLI.

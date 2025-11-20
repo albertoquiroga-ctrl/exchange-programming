@@ -16,7 +16,6 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set
 
 try:
@@ -82,7 +81,7 @@ def main() -> None:
         dashboard.run(skip_initial_refresh=args.collect)
 
 
-class MenuAction(Enum):
+class MenuAction:
     """Possible outcomes from the menu prompt."""
 
     REFRESH = "refresh"
@@ -119,9 +118,9 @@ class DashboardSession:
                 else:
                     skip_refresh = False
                 action = self.menu.prompt()
-                if action is MenuAction.EXIT:
+                if action == MenuAction.EXIT:
                     break
-                if action is MenuAction.REFRESH:
+                if action == MenuAction.REFRESH:
                     continue
                 # Defensive clamp so a student entering "-5" never crashes the loop.
                 wait_seconds = max(0, int(self.config.app.poll_interval))
@@ -179,7 +178,7 @@ class MenuController:
         """Reload menu choices from the latest available payloads."""
         self._options = _load_menu_options(self.config)
 
-    def prompt(self) -> MenuAction:
+    def prompt(self) -> str:
         """Run the input loop and return the chosen dashboard action."""
 
         menu_text = (
