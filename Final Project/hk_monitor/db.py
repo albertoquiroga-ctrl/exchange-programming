@@ -8,46 +8,49 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import datetime
 import sqlite3
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 ISO_FORMAT = "%Y-%m-%dT%H:%M:%S%z"
 
 
-@dataclass(slots=True)
 class WarningRecord:
     """Row model for severe weather warnings from the HK Observatory."""
-    level: str
-    message: str
-    updated_at: datetime
+
+    def __init__(self, level: str, message: str, updated_at: datetime):
+        self.level = level
+        self.message = message
+        self.updated_at = updated_at
 
 
-@dataclass(slots=True)
 class RainRecord:
     """Single reading of rain intensity for the configured district."""
-    district: str
-    intensity: str
-    updated_at: datetime
+
+    def __init__(self, district: str, intensity: str, updated_at: datetime):
+        self.district = district
+        self.intensity = intensity
+        self.updated_at = updated_at
 
 
-@dataclass(slots=True)
 class AqhiRecord:
     """Air Quality Health Index measurement with numeric value and category."""
-    station: str
-    category: str
-    value: float
-    updated_at: datetime
+
+    def __init__(self, station: str, category: str, value: float, updated_at: datetime):
+        self.station = station
+        self.category = category
+        self.value = value
+        self.updated_at = updated_at
 
 
-@dataclass(slots=True)
 class TrafficRecord:
     """Description of a traffic incident affecting one of the regions."""
-    severity: str
-    description: str
-    updated_at: datetime
+
+    def __init__(self, severity: str, description: str, updated_at: datetime):
+        self.severity = severity
+        self.description = description
+        self.updated_at = updated_at
 
 
 def init_db(db_path: Path) -> sqlite3.Connection:
@@ -105,46 +108,66 @@ def _create_tables(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def save_warning(conn: sqlite3.Connection, record: WarningRecord) -> None:
+def save_warning(conn: sqlite3.Connection, record: Any) -> None:
     """Insert a warning row while normalising timestamps."""
 
     # ``strftime`` stores ``datetime`` objects in ISO format so ChangeDetector
     # can compare strings lexicographically without re-parsing.
     conn.execute(
         "INSERT INTO warnings(level, message, updated_at) VALUES (?, ?, ?)",
-        (record.level, record.message, record.updated_at.strftime(ISO_FORMAT)),
-    )
-    conn.commit()
-
-
-def save_rain(conn: sqlite3.Connection, record: RainRecord) -> None:
-    """Insert a rain row for the monitored district."""
-    conn.execute(
-        "INSERT INTO rain(district, intensity, updated_at) VALUES (?, ?, ?)",
-        (record.district, record.intensity, record.updated_at.strftime(ISO_FORMAT)),
-    )
-    conn.commit()
-
-
-def save_aqhi(conn: sqlite3.Connection, record: AqhiRecord) -> None:
-    """Insert an AQHI row along with the numeric value."""
-    conn.execute(
-        "INSERT INTO aqhi(station, category, value, updated_at) VALUES (?, ?, ?, ?)",
         (
-            record.station,
-            record.category,
-            record.value,
-            record.updated_at.strftime(ISO_FORMAT),
+            _record_value(record, "level"),
+            _record_value(record, "message"),
+            _normalise_timestamp(_record_value(record, "updated_at")).strftime(
+                ISO_FORMAT
+            ),
         ),
     )
     conn.commit()
 
 
-def save_traffic(conn: sqlite3.Connection, record: TrafficRecord) -> None:
+def save_rain(conn: sqlite3.Connection, record: Any) -> None:
+    """Insert a rain row for the monitored district."""
+    conn.execute(
+        "INSERT INTO rain(district, intensity, updated_at) VALUES (?, ?, ?)",
+        (
+            _record_value(record, "district"),
+            _record_value(record, "intensity"),
+            _normalise_timestamp(_record_value(record, "updated_at")).strftime(
+                ISO_FORMAT
+            ),
+        ),
+    )
+    conn.commit()
+
+
+def save_aqhi(conn: sqlite3.Connection, record: Any) -> None:
+    """Insert an AQHI row along with the numeric value."""
+    conn.execute(
+        "INSERT INTO aqhi(station, category, value, updated_at) VALUES (?, ?, ?, ?)",
+        (
+            _record_value(record, "station"),
+            _record_value(record, "category"),
+            _record_value(record, "value"),
+            _normalise_timestamp(_record_value(record, "updated_at")).strftime(
+                ISO_FORMAT
+            ),
+        ),
+    )
+    conn.commit()
+
+
+def save_traffic(conn: sqlite3.Connection, record: Any) -> None:
     """Insert a traffic row describing the latest incident."""
     conn.execute(
         "INSERT INTO traffic(severity, description, updated_at) VALUES (?, ?, ?)",
-        (record.severity, record.description, record.updated_at.strftime(ISO_FORMAT)),
+        (
+            _record_value(record, "severity"),
+            _record_value(record, "description"),
+            _normalise_timestamp(_record_value(record, "updated_at")).strftime(
+                ISO_FORMAT
+            ),
+        ),
     )
     conn.commit()
 
@@ -183,6 +206,27 @@ def _fetch_latest_row(conn: sqlite3.Connection, table: str) -> Optional[sqlite3.
 def get_last_two(conn: sqlite3.Connection, table: str) -> List[sqlite3.Row]:
     """Public wrapper used by ChangeDetector to compare consecutive rows."""
     return _fetch_latest_two(conn, table)
+
+
+def _record_value(record: Any, key: str) -> Any:
+    """Support dict-like and object-like records transparently."""
+
+    if isinstance(record, dict):
+        return record.get(key)
+    return getattr(record, key)
+
+
+def _normalise_timestamp(value: Any) -> datetime:
+    """Accept datetime objects or ISO formatted strings for updated_at."""
+
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise TypeError("updated_at must be a datetime or ISO string") from exc
+    raise TypeError("updated_at must be a datetime or ISO string")
 
 
 @contextmanager
