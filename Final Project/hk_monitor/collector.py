@@ -23,8 +23,6 @@ from .config import Config
 
 LOGGER = logging.getLogger(__name__)
 ISO_VARIANTS = ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ")
-# A handful of retries keep student demos resilient to flaky HK APIs.
-MAX_ATTEMPTS = 3
 # Sending a descriptive UA helps data.gov.hk trace demo traffic if needed.
 HTTP_HEADERS = {"User-Agent": "HKConditionsMonitor/1.0 (+https://data.gov.hk)"}
 
@@ -73,9 +71,11 @@ def _collect(config: Config, conn: sqlite3.Connection) -> None:
 def fetch_warning(config: Config) -> db.WarningRecord | None:
     """Return the latest weather warning, if any."""
 
+    # Step 1: fetch the payload once from either the bundled mock file or HTTP.
     payload = _get_payload(
         config, config.api.warnings_url, config.mocks.warnings, key=None
     )
+    # Step 2: locate the most recent warning entry and normalize timestamps.
     feed_timestamp = None
     if isinstance(payload, dict):
         feed_timestamp = payload.get("updateTime") or payload.get("issueTime")
@@ -90,6 +90,7 @@ def fetch_warning(config: Config) -> db.WarningRecord | None:
             message="No weather warnings in force.",
             updated_at=_parse_time(str(feed_timestamp) if feed_timestamp else None),
         )
+    # Step 3: build a normalized record so downstream storage stays stable.
     # The feed lists warnings in reverse chronological order, so take the first
     # structured entry and normalise keys coming from different HK APIs.
     entry = details[0]
@@ -123,6 +124,7 @@ def fetch_warning(config: Config) -> db.WarningRecord | None:
 def fetch_rain(config: Config) -> db.RainRecord | None:
     """Return a rain record for the selected district."""
 
+    # Step 1: fetch the payload once from the configured source.
     payload = _get_payload(
         config, config.api.rainfall_url, config.mocks.rainfall, key=None
     )
@@ -136,8 +138,7 @@ def fetch_rain(config: Config) -> db.RainRecord | None:
             entries = [row for row in data if isinstance(row, dict)]
     elif isinstance(payload, list):
         entries = [row for row in payload if isinstance(row, dict)]
-    # Each dashboard instance monitors a single district, so pick the configured
-    # reading instead of averaging the whole array.
+    # Step 2: pick the configured district reading instead of averaging.
     district = config.app.rain_district
     entry = next((row for row in entries if row.get("place") == district), None)
     if not entry:
@@ -152,6 +153,7 @@ def fetch_rain(config: Config) -> db.RainRecord | None:
         )
     if not entry:
         return None
+    # Step 3: build the stored record while normalizing numeric fields.
     raw_value = entry.get("max") or entry.get("value") or entry.get("mm") or 0
     try:
         value = float(raw_value)
@@ -172,6 +174,7 @@ def fetch_rain(config: Config) -> db.RainRecord | None:
 def fetch_aqhi(config: Config) -> db.AqhiRecord | None:
     """Return AQHI metrics for the configured station."""
 
+    # Step 1: fetch once from the mock or live endpoint.
     payload = _get_payload(config, config.api.aqhi_url, config.mocks.aqhi, key=None)
     if isinstance(payload, list):
         stations = [row for row in payload if isinstance(row, dict)]
@@ -183,13 +186,14 @@ def fetch_aqhi(config: Config) -> db.AqhiRecord | None:
             stations = [row for row in raw if isinstance(row, dict)]
         else:
             stations = []
-    # Iterate through the payload to find the user-selected monitoring station.
+    # Step 2: iterate through the payload to find the selected station.
     entry = next(
         (row for row in stations if row.get("station") == config.app.aqhi_station),
         None,
     )
     if not entry:
         return None
+    # Step 3: build a normalized record matching the expected DB schema.
     try:
         value = float(entry.get("aqhi") or entry.get("value") or entry.get("index") or 0)
     except (TypeError, ValueError):
@@ -217,6 +221,7 @@ def fetch_aqhi(config: Config) -> db.AqhiRecord | None:
 def fetch_traffic(config: Config) -> db.TrafficRecord | None:
     """Return the latest traffic incident that matches the configured region."""
 
+    # Step 1: fetch the payload and parse XML when necessary.
     payload = _get_payload(
         config,
         config.api.traffic_url,
@@ -224,11 +229,12 @@ def fetch_traffic(config: Config) -> db.TrafficRecord | None:
         key=None,
         parser=_parse_traffic_xml,
     )
-    # Traffic payloads can describe many regions; narrow to the learner's focus.
+    # Step 2: narrow to the learner's focus region.
     incidents = _extract_traffic_entries(payload)
     entry = _pick_traffic_entry(incidents, config.app.traffic_region)
     if not entry:
         return None
+    # Step 3: normalize fields so database rows remain consistent.
     severity = (
         entry.get("severity")
         or entry.get("category")
@@ -351,16 +357,22 @@ def _get_payload(
     key: str | None = None,
     parser: Callable[[str], Any] | None = None,
 ) -> Any:
-    """Return either the mock payload or the live HTTP response, caching both."""
+    """Return either the mock payload or the live HTTP response once."""
 
-    cache_path = _cache_path(mock_path, key)
-    # Development often happens offline, so allow toggling between the bundled
-    # mock files and live HTTP data with ``app.use_mock_data``.
     if config.app.use_mock_data:
-        payload = _load_from_disk(mock_path)
-        _persist_cache(cache_path, payload)
+        try:
+            payload = _load_from_disk(mock_path)
+        except (OSError, json.JSONDecodeError) as exc:
+            LOGGER.warning("Unable to load mock payload %s: %s", mock_path, exc)
+            payload = {}
     else:
-        payload = _fetch_live_payload(url, cache_path, parser=parser)
+        try:
+            response = requests.get(url, timeout=10, headers=HTTP_HEADERS)
+            response.raise_for_status()
+            payload = parser(response.text) if parser else response.json()
+        except (requests.RequestException, ValueError, ET.ParseError) as exc:
+            LOGGER.warning("Failed to fetch payload from %s: %s", url, exc)
+            payload = {}
     if key and isinstance(payload, dict):
         if key in payload:
             return payload[key]
@@ -368,74 +380,6 @@ def _get_payload(
         if isinstance(nested, dict) and key in nested:
             return nested[key]
     return payload
-
-
-def _fetch_live_payload(
-    url: str, cache_path: Path, parser: Callable[[str], Any] | None = None
-) -> Any:
-    """Hit the HTTP endpoint with retries and cache persistence."""
-
-    last_error: Exception | None = None
-    # Simple retry loop keeps the classroom demo from failing on temporary 502s.
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        try:
-            response = requests.get(url, timeout=10, headers=HTTP_HEADERS)
-            response.raise_for_status()
-            if parser:
-                payload = parser(response.text)
-            else:
-                payload = response.json()
-            _persist_cache(cache_path, payload)
-            return payload
-        except (requests.RequestException, ValueError, ET.ParseError) as exc:
-            last_error = exc
-            LOGGER.warning(
-                "Attempt %s/%s to fetch %s failed: %s",
-                attempt,
-                MAX_ATTEMPTS,
-                url,
-                exc,
-            )
-    # Retries exhausted: reuse yesterday's payload instead of crashing.
-    cached = _load_cached_payload(cache_path)
-    if cached is not None:
-        LOGGER.info("Using cached payload from %s for %s", cache_path, url)
-        return cached
-    if last_error:
-        raise last_error
-    raise RuntimeError(f"Unable to fetch payload from {url}")
-
-
-def _cache_path(mock_path: Path, key: str | None) -> Path:
-    """Build a filesystem-friendly cache filename derived from the payload."""
-
-    identifier = (key or mock_path.stem or "payload").strip() or "payload"
-    # Replace spaces and punctuation so Windows/macOS share the same filenames.
-    safe = "".join(c if c.isalnum() or c in {"-", "_"} else "_" for c in identifier)
-    return mock_path.parent / f"last_{safe}.json"
-
-
-def _persist_cache(path: Path, payload: Any) -> None:
-    """Write the latest payload to disk for offline replays."""
-
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as fh:
-            json.dump(payload, fh)
-    except OSError as exc:  # pragma: no cover - cache failures are non-fatal
-        LOGGER.debug("Unable to persist payload cache %s: %s", path, exc)
-
-
-def _load_cached_payload(path: Path) -> Any | None:
-    """Load the previously cached payload, if the file is still valid."""
-
-    try:
-        return _load_from_disk(path)
-    except FileNotFoundError:
-        return None
-    except json.JSONDecodeError as exc:
-        LOGGER.warning("Cached payload at %s is invalid: %s", path, exc)
-        return None
 
 
 def _load_from_disk(path: Path) -> Any:
