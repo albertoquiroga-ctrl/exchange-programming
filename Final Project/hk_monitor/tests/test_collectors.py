@@ -59,29 +59,15 @@ def test_change_detector_emits_alert_on_category_change(tmp_path):
         assert "TC8" in captured
 
 
-def test_fetch_warning_uses_cached_payload_on_http_failure(monkeypatch):
-    # Prime the cache using mock data so a fallback snapshot exists.
+def test_fetch_warning_handles_http_failure(monkeypatch):
     config = _load_config()
-    baseline = collector.fetch_warning(config)
-    assert baseline is not None
-
-    failing_config = _load_config()
-    failing_config.app.use_mock_data = False
-
-    load_calls: dict[str, Path] = {}
-    original_loader = collector._load_cached_payload
-
-    def spy_loader(path: Path):
-        load_calls["path"] = path
-        return original_loader(path)
-
-    monkeypatch.setattr(collector, "_load_cached_payload", spy_loader)
+    config.app.use_mock_data = False
 
     def failing_get(*args, **kwargs):
         raise requests.RequestException("boom")
 
     monkeypatch.setattr(collector.requests, "get", failing_get)
 
-    record = collector.fetch_warning(failing_config)
+    record = collector.fetch_warning(config)
     assert record is not None
-    assert load_calls["path"].name.startswith("last_warnings")
+    assert record.message == "No weather warnings in force."

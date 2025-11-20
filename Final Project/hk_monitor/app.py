@@ -416,13 +416,9 @@ def _load_menu_options(config: Config) -> Dict[str, List[str]]:
 def _build_menu_choices(
     mock_path: Path, extractor: Callable[[Path], List[str]]
 ) -> List[str]:
-    """Merge bundled mock files with cached live payloads for menu prompts."""
+    """Read bundled mock files to surface menu prompts."""
 
-    choices: Set[str] = set()
-    for source in _menu_payload_sources(mock_path):
-        for entry in extractor(source):
-            choices.add(entry)
-    return sorted(choices)
+    return sorted(extractor(mock_path))
 
 
 def _ensure_menu_choices(
@@ -451,24 +447,6 @@ def _dedupe_preserve_order(values: Sequence[str]) -> List[str]:
         seen.add(value)
         ordered.append(value)
     return ordered
-
-
-def _menu_payload_sources(mock_path: Path) -> Sequence[Path]:
-    """Return every file that might contain enumerated options for a feed."""
-
-    sources = [mock_path]
-    cache_path = _cached_payload_path(mock_path)
-    if cache_path != mock_path:
-        sources.append(cache_path)
-    return sources
-
-
-def _cached_payload_path(mock_path: Path) -> Path:
-    """Mirror collector cache naming so menu loading finds live payloads."""
-
-    identifier = (mock_path.stem or "payload").strip() or "payload"
-    safe = "".join(c if c.isalnum() or c in {"-", "_"} else "_" for c in identifier)
-    return mock_path.parent / f"last_{safe}.json"
 
 
 def _extract_places(path: Path) -> List[str]:
