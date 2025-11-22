@@ -25,21 +25,16 @@ except ImportError:  # pragma: no cover - allow running as a script
 def parse_args():
     parser = argparse.ArgumentParser(description="HK Conditions Monitor (simple console)")
     parser.add_argument(
-        "--config",
-        default="config.toml",
-        help="Path to the TOML configuration file (default: config.toml)",
-    )
-    parser.add_argument(
         "--use-mock",
         action="store_true",
-        help="Force mock data even if the config says otherwise.",
+        help="Use the bundled mock files instead of the live APIs.",
     )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    config = load_config(args.config)
+    config = load_config()
     if args.use_mock:
         config["app"]["use_mock_data"] = True
 

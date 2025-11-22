@@ -4,7 +4,6 @@ This module compares two snapshots (dictionaries) and prints friendly
 messages when the main categories change.
 """
 
-import argparse
 from pathlib import Path
 import sys
 
@@ -64,15 +63,7 @@ def print_alerts(messages):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Check snapshot changes without a database.")
-    parser.add_argument(
-        "--config",
-        default="config.toml",
-        help="Path to the TOML configuration file (default: config.toml)",
-    )
-    args = parser.parse_args(argv)
-
-    config = load_config(args.config)
+    config = load_config()
     print("Collecting first snapshot...")
     first = collect_once(config)
     input("Press Enter to collect again and check for changes.")
