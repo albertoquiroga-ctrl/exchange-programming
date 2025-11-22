@@ -5,11 +5,10 @@ No database and no mock data; everything shown is from the latest API calls.
 """
 
 import argparse
-import json
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from pathlib import Path
+from typing import Any
 
 import requests
 
@@ -26,8 +25,6 @@ URLS = {
     "aqhi": "https://dashboard.data.gov.hk/api/aqhi-individual?format=json",
     "traffic": "https://www.td.gov.hk/en/special_news/trafficnews.xml",
 }
-
-BASE_DIR = Path(__file__).resolve().parent
 
 HTTP_HEADERS = {"User-Agent": "HKConditionsMonitor/1.0 (+https://data.gov.hk)"}
 
@@ -70,7 +67,7 @@ def _collect_snapshot(config):
 
 
 def _fetch_warning(config):
-    payload = _get_payload("warnings", config)
+    payload: Any = _get_payload("warnings", config)
     if not isinstance(payload, dict):
         return _empty_warning()
 
@@ -103,7 +100,7 @@ def _fetch_warning(config):
 
 
 def _fetch_rain(config):
-    payload = _get_payload("rain", config)
+    payload: Any = _get_payload("rain", config)
     entries = []
     if isinstance(payload, dict):
         data = payload.get("data") or (payload.get("rainfall") or {}).get("data")
@@ -130,7 +127,7 @@ def _fetch_rain(config):
 
 
 def _fetch_aqhi(config):
-    payload = _get_payload("aqhi", config)
+    payload: Any = _get_payload("aqhi", config)
     if isinstance(payload, list):
         stations = [row for row in payload if isinstance(row, dict)]
     elif isinstance(payload, dict):
@@ -163,7 +160,7 @@ def _fetch_aqhi(config):
 
 
 def _fetch_traffic(config):
-    payload = _get_payload("traffic", config, parser=_parse_traffic_xml)
+    payload: Any = _get_payload("traffic", config, parser=_parse_traffic_xml)
     incidents = _extract_traffic_entries(payload)
     entry = _pick_traffic_entry(incidents, config["traffic_region"])
     if not entry:
@@ -182,7 +179,7 @@ def _fetch_traffic(config):
     }
 
 
-def _get_payload(kind, config, parser=None):
+def _get_payload(kind: str, config: dict, parser=None) -> Any:
     url = URLS[kind]
     try:
         response = requests.get(url, timeout=10, headers=HTTP_HEADERS)
