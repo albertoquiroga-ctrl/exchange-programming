@@ -1,0 +1,3 @@
+Portfolio optimization is a powerful tool in fintech, enabling investors to balance risk and return effectively. By applying mathematical models to select the best mix of assets, it helps maximize profits while minimizing risks. This approach is essential for informed decision-making and is widely used in financial planning and asset management.
+
+In this simple example, we will take the list of stock ticker which the user is interested in, then we run Portfolio optimization algorithm to find the allocation percentage on each stocks that achieve maximum Sharpe ratio based on historical. And then we test the portfolio performance
