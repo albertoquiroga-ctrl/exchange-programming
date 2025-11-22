@@ -52,7 +52,7 @@ class Messenger:
         raise NotImplementedError
 
 
-class ConsoleMessenger:
+class ConsoleMessenger(Messenger):
     """Messenger that prints alerts to stdout for local demos."""
 
     def __init__(self, stream: Optional[TextIO] = None):
