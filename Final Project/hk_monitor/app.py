@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List
 
 import requests
 
+# Default starting selections and refresh timing
 DEFAULTS = {
     "rain_district": "Central & Western",
     "aqhi_station": "Central/Western",
@@ -19,6 +20,7 @@ DEFAULTS = {
     "poll_interval": 60,
 }
 
+# Menu options for rain districts (numbered list)
 RAIN_CHOICES = [
     "Central & Western",
     "Eastern",
@@ -35,6 +37,7 @@ RAIN_CHOICES = [
     "Yuen Long",
 ]
 
+# Menu options for AQHI stations
 AQHI_CHOICES = [
     "Central/Western",
     "Eastern",
@@ -46,6 +49,7 @@ AQHI_CHOICES = [
     "Yuen Long",
 ]
 
+# Menu options for traffic regions
 TRAFFIC_CHOICES = [
     "Hong Kong Island",
     "Kowloon",
@@ -65,6 +69,7 @@ HTTP_HEADERS = {"User-Agent": "HKConditionsMonitor/1.0 (+https://data.gov.hk)"}
 
 
 def main():
+    # Entry point: loop forever until the user quits
     _parse_args()  # kept for future flags
     config = DEFAULTS.copy()
 
@@ -89,11 +94,13 @@ def main():
 
 
 def _parse_args():
+    # Argparse kept small so we can add flags later if needed
     parser = argparse.ArgumentParser(description="Simple HK monitor console")
     return parser.parse_args()
 
 
 def _collect_snapshot(config):
+    # Pull one snapshot from each live API
     return {
         "warnings": _fetch_warning(config),
         "rain": _fetch_rain(config),
@@ -103,6 +110,7 @@ def _collect_snapshot(config):
 
 
 def _fetch_warning(config):
+    # Grab the latest weather warning (or say none)
     payload: Any = _get_payload("warnings")
     if not isinstance(payload, dict):
         return _empty_warning()
@@ -137,6 +145,7 @@ def _fetch_warning(config):
 
 
 def _fetch_rain(config):
+    # Grab rain reading for the chosen district
     payload: Any = _get_payload("rain")
     entries = []
     if isinstance(payload, dict):
@@ -167,6 +176,7 @@ def _fetch_rain(config):
 
 
 def _fetch_aqhi(config):
+    # Grab AQHI reading for the chosen station
     payload: Any = _get_payload("aqhi")
     if isinstance(payload, list):
         stations = [row for row in payload if isinstance(row, dict)]
@@ -202,6 +212,7 @@ def _fetch_aqhi(config):
 
 
 def _fetch_traffic(config):
+    # Grab the most recent traffic incident and match the chosen region
     payload: Any = _get_payload("traffic", parser=_parse_traffic_xml)
     incidents = _extract_traffic_entries(payload)
     entry = _pick_traffic_entry(incidents, config["traffic_region"])
@@ -225,6 +236,7 @@ def _fetch_traffic(config):
 
 
 def _get_payload(kind: str, parser=None) -> Any:
+    # One HTTP GET helper used by all collectors
     url = URLS[kind]
     response = requests.get(url, timeout=10, headers=HTTP_HEADERS)
     response.raise_for_status()
@@ -232,6 +244,7 @@ def _get_payload(kind: str, parser=None) -> Any:
 
 
 def _parse_traffic_xml(text):
+    # Turn XML traffic feed into a list of dictionaries
     root = ET.fromstring(text)
     incidents: List[Dict[str, Any]] = []
     for message in root.findall(".//message"):
@@ -255,6 +268,7 @@ def _parse_traffic_xml(text):
 
 
 def _extract_traffic_entries(payload):
+    # Find the list of incidents inside a mixed payload
     if isinstance(payload, list):
         return [entry for entry in payload if isinstance(entry, dict)]
     if isinstance(payload, dict):
@@ -267,6 +281,7 @@ def _extract_traffic_entries(payload):
 
 
 def _pick_traffic_entry(incidents, target_region):
+    # Choose the first incident that mentions the target region
     if not incidents:
         return None
     needle = target_region.strip().lower()
@@ -287,6 +302,7 @@ def _pick_traffic_entry(incidents, target_region):
 
 
 def _print_snapshot(snapshot, config):
+    # Render the dashboard to the console
     header = (
         f"District: {config['rain_district']} | "
         f"AQHI: {config['aqhi_station']} | "
@@ -307,6 +323,7 @@ def _print_snapshot(snapshot, config):
 
 
 def _change_locations(config):
+    # Show menus and update the current selections
     print("\nChange locations (press Enter to keep current)")
     config["rain_district"] = _select_from_list(
         "Rain districts", RAIN_CHOICES, config["rain_district"]
@@ -320,12 +337,14 @@ def _change_locations(config):
 
 
 def _print_choices(title: str, options: Iterable[str]):
+    # Print a numbered list for menu selection
     print(f"\n{title}:")
     for idx, option in enumerate(options, start=1):
         print(f"  {idx}. {option}")
 
 
 def _select_from_list(title: str, options: list[str], current: str) -> str:
+    # Read user input; accept a number or keep the current value
     _print_choices(title, options)
     raw = input(f"{title[:-1]} (current: {current}): ").strip()
     if not raw:
