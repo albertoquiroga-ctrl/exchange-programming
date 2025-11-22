@@ -8,7 +8,7 @@ import argparse
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any, Dict, Iterable, List
 
 import requests
 
@@ -106,9 +106,10 @@ def _fetch_warning(config):
     payload: Any = _get_payload("warnings")
     if not isinstance(payload, dict):
         return _empty_warning()
+    payload_dict: Dict[str, Any] = payload
 
-    feed_time = payload.get("updateTime") or payload.get("issueTime")
-    details = payload.get("details") or payload.get("warning") or payload.get("data")
+    feed_time = payload_dict.get("updateTime") or payload_dict.get("issueTime")
+    details = payload_dict.get("details") or payload_dict.get("warning") or payload_dict.get("data")
     if not isinstance(details, list) or not details:
         return _empty_warning(feed_time)
 
@@ -139,7 +140,8 @@ def _fetch_rain(config):
     payload: Any = _get_payload("rain")
     entries = []
     if isinstance(payload, dict):
-        data = payload.get("data") or (payload.get("rainfall") or {}).get("data")
+        payload_dict: Dict[str, Any] = payload
+        data = payload_dict.get("data") or (payload_dict.get("rainfall") or {}).get("data")
         if isinstance(data, list):
             entries = [row for row in data if isinstance(row, dict)]
     elif isinstance(payload, list):
@@ -154,7 +156,9 @@ def _fetch_rain(config):
 
     value = _to_float(entry.get("max") or entry.get("value") or entry.get("mm"))
     category = _categorize_rain(value)
-    updated = entry.get("recordTime") or entry.get("time") or payload.get("updateTime")
+    updated = entry.get("recordTime") or entry.get("time")
+    if not updated and isinstance(payload, dict):
+        updated = payload.get("updateTime")
     return {
         "district": str(entry.get("place") or district),
         "intensity": f"{value:.1f} mm ({category})",
@@ -167,7 +171,8 @@ def _fetch_aqhi(config):
     if isinstance(payload, list):
         stations = [row for row in payload if isinstance(row, dict)]
     elif isinstance(payload, dict):
-        raw = payload.get("aqhi") or payload.get("data")
+        payload_dict: Dict[str, Any] = payload
+        raw = payload_dict.get("aqhi") or payload_dict.get("data")
         stations = [row for row in raw if isinstance(row, dict)] if isinstance(raw, list) else []
     else:
         stations = []
@@ -185,7 +190,8 @@ def _fetch_aqhi(config):
     category = entry.get("health_risk") or entry.get("category") or _categorize_aqhi(value)
     timestamp = entry.get("time") or entry.get("publish_date") or entry.get("updateTime")
     if not timestamp and isinstance(payload, dict):
-        timestamp = payload.get("publishDate") or payload.get("updateTime")
+        payload_dict: Dict[str, Any] = payload
+        timestamp = payload_dict.get("publishDate") or payload_dict.get("updateTime")
 
     return {
         "station": str(entry.get("station") or config["aqhi_station"]),
@@ -206,9 +212,10 @@ def _fetch_traffic(config):
     description = (
         entry.get("content") or entry.get("description") or entry.get("summary") or "Traffic update"
     )
-    updated = entry.get("update_time") or entry.get("updateTime") or (
-        payload.get("updateTime") if isinstance(payload, dict) else None
-    )
+    updated = entry.get("update_time") or entry.get("updateTime")
+    if not updated and isinstance(payload, dict):
+        payload_dict: Dict[str, Any] = payload
+        updated = payload_dict.get("updateTime")
 
     return {
         "severity": str(severity).title(),
@@ -226,9 +233,9 @@ def _get_payload(kind: str, parser=None) -> Any:
 
 def _parse_traffic_xml(text):
     root = ET.fromstring(text)
-    incidents = []
+    incidents: List[Dict[str, Any]] = []
     for message in root.findall(".//message"):
-        payload = {}
+        payload: Dict[str, Any] = {}
         for child in message:
             key = child.tag.lower()
             payload[key] = (child.text or "").strip()
@@ -251,8 +258,9 @@ def _extract_traffic_entries(payload):
     if isinstance(payload, list):
         return [entry for entry in payload if isinstance(entry, dict)]
     if isinstance(payload, dict):
+        payload_dict: Dict[str, Any] = payload
         for key in ("trafficnews", "incidents", "messages", "data"):
-            raw = payload.get(key)
+            raw = payload_dict.get(key)
             if isinstance(raw, list):
                 return [entry for entry in raw if isinstance(entry, dict)]
     return []
