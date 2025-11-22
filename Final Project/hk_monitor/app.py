@@ -1,14 +1,14 @@
-"""HK Conditions Monitor (simple console).
+"""HK Conditions Monitor (simple console, live data only).
 
 Single file. Fetches live data from Hong Kong open-data APIs.
-No database and no mock data; everything shown is from the latest API calls.
+No TOML config, no database, no mocks.
 """
 
 import argparse
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from typing import Any
+from typing import Any, Iterable
 
 import requests
 
@@ -18,6 +18,41 @@ DEFAULTS = {
     "traffic_region": "Hong Kong Island",
     "poll_interval": 60,
 }
+
+RAIN_CHOICES = [
+    "Central & Western",
+    "Eastern",
+    "Southern",
+    "Wan Chai",
+    "Kowloon City",
+    "Kwun Tong",
+    "Wong Tai Sin",
+    "Yau Tsim Mong",
+    "Sha Tin",
+    "Tai Po",
+    "Tsuen Wan",
+    "Tuen Mun",
+    "Yuen Long",
+]
+
+AQHI_CHOICES = [
+    "Central/Western",
+    "Eastern",
+    "Kwun Tong",
+    "Sham Shui Po",
+    "Sha Tin",
+    "Tsuen Wan",
+    "Tuen Mun",
+    "Yuen Long",
+]
+
+TRAFFIC_CHOICES = [
+    "Hong Kong Island",
+    "Kowloon",
+    "New Territories",
+    "Lantau Island",
+    "Islands District",
+]
 
 URLS = {
     "warnings": "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=warnsum&lang=en",
@@ -30,11 +65,12 @@ HTTP_HEADERS = {"User-Agent": "HKConditionsMonitor/1.0 (+https://data.gov.hk)"}
 
 
 def main():
-    args = _parse_args()
+    _parse_args()  # kept for future flags
     config = DEFAULTS.copy()
 
-    print("HK Conditions Monitor")
-    print("Live data direct from the HK open-data APIs.\n")
+    print("HK Conditions Monitor (live data)")
+    print("Commands: Enter=refresh, c=change locations, q=quit")
+    print("Current choices are shown when changing locations.\n")
 
     while True:
         snapshot = _collect_snapshot(config)
@@ -67,7 +103,7 @@ def _collect_snapshot(config):
 
 
 def _fetch_warning(config):
-    payload: Any = _get_payload("warnings", config)
+    payload: Any = _get_payload("warnings")
     if not isinstance(payload, dict):
         return _empty_warning()
 
@@ -100,7 +136,7 @@ def _fetch_warning(config):
 
 
 def _fetch_rain(config):
-    payload: Any = _get_payload("rain", config)
+    payload: Any = _get_payload("rain")
     entries = []
     if isinstance(payload, dict):
         data = payload.get("data") or (payload.get("rainfall") or {}).get("data")
@@ -127,7 +163,7 @@ def _fetch_rain(config):
 
 
 def _fetch_aqhi(config):
-    payload: Any = _get_payload("aqhi", config)
+    payload: Any = _get_payload("aqhi")
     if isinstance(payload, list):
         stations = [row for row in payload if isinstance(row, dict)]
     elif isinstance(payload, dict):
@@ -160,7 +196,7 @@ def _fetch_aqhi(config):
 
 
 def _fetch_traffic(config):
-    payload: Any = _get_payload("traffic", config, parser=_parse_traffic_xml)
+    payload: Any = _get_payload("traffic", parser=_parse_traffic_xml)
     incidents = _extract_traffic_entries(payload)
     entry = _pick_traffic_entry(incidents, config["traffic_region"])
     if not entry:
@@ -170,7 +206,9 @@ def _fetch_traffic(config):
     description = (
         entry.get("content") or entry.get("description") or entry.get("summary") or "Traffic update"
     )
-    updated = entry.get("update_time") or entry.get("updateTime") or (payload.get("updateTime") if isinstance(payload, dict) else None)
+    updated = entry.get("update_time") or entry.get("updateTime") or (
+        payload.get("updateTime") if isinstance(payload, dict) else None
+    )
 
     return {
         "severity": str(severity).title(),
@@ -179,14 +217,11 @@ def _fetch_traffic(config):
     }
 
 
-def _get_payload(kind: str, config: dict, parser=None) -> Any:
+def _get_payload(kind: str, parser=None) -> Any:
     url = URLS[kind]
-    try:
-        response = requests.get(url, timeout=10, headers=HTTP_HEADERS)
-        response.raise_for_status()
-        return parser(response.text) if parser else response.json()
-    except Exception:
-        return {}
+    response = requests.get(url, timeout=10, headers=HTTP_HEADERS)
+    response.raise_for_status()
+    return parser(response.text) if parser else response.json()
 
 
 def _parse_traffic_xml(text):
@@ -264,15 +299,27 @@ def _print_snapshot(snapshot, config):
 
 
 def _change_locations(config):
+    print("\nChange locations (press Enter to keep current)")
+    _print_choices("Rain districts", RAIN_CHOICES)
     new_rain = input(f"Rain district (current: {config['rain_district']}): ").strip()
     if new_rain:
         config["rain_district"] = new_rain
+
+    _print_choices("AQHI stations", AQHI_CHOICES)
     new_aqhi = input(f"AQHI station (current: {config['aqhi_station']}): ").strip()
     if new_aqhi:
         config["aqhi_station"] = new_aqhi
+
+    _print_choices("Traffic regions", TRAFFIC_CHOICES)
     new_traffic = input(f"Traffic region (current: {config['traffic_region']}): ").strip()
     if new_traffic:
         config["traffic_region"] = new_traffic
+
+
+def _print_choices(title: str, options: Iterable[str]):
+    print(f"\n{title}:")
+    for idx, option in enumerate(options, start=1):
+        print(f"  {idx}. {option}")
 
 
 def _format_warning(row):
