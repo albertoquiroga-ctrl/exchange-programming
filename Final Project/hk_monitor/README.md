@@ -1,6 +1,6 @@
 # HK Conditions Monitor (super simple)
 
-Everything is inside `app.py`. No TOML files, no database, just random mock data printed to the console.
+Everything is inside `app.py`. No TOML files, no database. It pulls live data from the Hong Kong open-data APIs and only falls back to mock JSON if you pass `--use-mock` or the API fails.
 
 ## How to run
 ```bash

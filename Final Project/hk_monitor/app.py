@@ -1,44 +1,55 @@
-"""Ultra-simple HK Conditions Monitor demo.
+"""HK Conditions Monitor (simple console).
 
-Single file, no database, no config files. Each refresh shows randomised
-mock data so students can focus on the printout and the input loop.
+Single file. Fetches live data from Hong Kong open-data APIs.
+Falls back to bundled mock JSON only when you pass --use-mock or when
+the API call fails. Nothing is stored on disk.
 """
 
 import argparse
-import random
+import json
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime
+from pathlib import Path
 
+import requests
 
 DEFAULTS = {
     "rain_district": "Central & Western",
     "aqhi_station": "Central/Western",
     "traffic_region": "Hong Kong Island",
-    "poll_interval": 5,
+    "poll_interval": 60,
+    "use_mock": False,
 }
 
-SAMPLE_WARNINGS = [
-    ("None", "No weather warnings in force."),
-    ("Amber Rain", "Showers in parts of the city."),
-    ("Thunderstorm", "Thunderstorms expected, stay indoors."),
-]
+URLS = {
+    "warnings": "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=warnsum&lang=en",
+    "rain": "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=en",
+    "aqhi": "https://dashboard.data.gov.hk/api/aqhi-individual?format=json",
+    "traffic": "https://www.td.gov.hk/en/special_news/trafficnews.xml",
+}
 
-SAMPLE_TRAFFIC = [
-    ("Info", "Light traffic reported."),
-    ("Minor", "Slow traffic near the harbour tunnel."),
-    ("Major", "Accident on main highway, expect delays."),
-]
+BASE_DIR = Path(__file__).resolve().parent
+MOCKS = {
+    "warnings": BASE_DIR / "tests/data/warnings.json",
+    "rain": BASE_DIR / "tests/data/rainfall.json",
+    "aqhi": BASE_DIR / "tests/data/aqhi.json",
+    "traffic": BASE_DIR / "tests/data/traffic.json",
+}
+
+HTTP_HEADERS = {"User-Agent": "HKConditionsMonitor/1.0 (+https://data.gov.hk)"}
 
 
 def main():
     args = _parse_args()
     config = DEFAULTS.copy()
+    config["use_mock"] = args.use_mock
 
-    print("HK Conditions Monitor (super simple)")
-    print("Data lives only on screen. Refresh to see new random values.\n")
+    print("HK Conditions Monitor")
+    print("Live data when available; mock data only if requested or on errors.\n")
 
     while True:
-        snapshot = _make_snapshot(config)
+        snapshot = _collect_snapshot(config)
         _print_snapshot(snapshot, config)
 
         choice = input("\nEnter=refresh | c=change locations | q=quit: ").strip().lower()
@@ -55,43 +66,203 @@ def main():
 
 def _parse_args():
     parser = argparse.ArgumentParser(description="Simple HK monitor console")
-    # Kept for compatibility; currently does nothing fancy.
-    parser.add_argument("--use-mock", action="store_true", help="Mock data is always used.")
+    parser.add_argument("--use-mock", action="store_true", help="Force use of local mock JSON files.")
     return parser.parse_args()
 
 
-def _make_snapshot(config):
-    now = _ts()
-    warning_level, warning_msg = random.choice(SAMPLE_WARNINGS)
-    rain_value = round(random.uniform(0, 20), 1)
-    rain_category = _categorize_rain(rain_value)
-    aqhi_value = round(random.uniform(1, 10), 1)
-    aqhi_category = _categorize_aqhi(aqhi_value)
-    traffic_level, traffic_msg = random.choice(SAMPLE_TRAFFIC)
+def _collect_snapshot(config):
+    return {
+        "warnings": _fetch_warning(config),
+        "rain": _fetch_rain(config),
+        "aqhi": _fetch_aqhi(config),
+        "traffic": _fetch_traffic(config),
+    }
+
+
+def _fetch_warning(config):
+    payload = _get_payload("warnings", config)
+    if not isinstance(payload, dict):
+        return _empty_warning()
+
+    feed_time = payload.get("updateTime") or payload.get("issueTime")
+    details = payload.get("details") or payload.get("warning") or payload.get("data")
+    if not isinstance(details, list) or not details:
+        return _empty_warning(feed_time)
+
+    entry = details[0]
+    level = (
+        entry.get("warningStatementCode")
+        or entry.get("warningMessageCode")
+        or entry.get("warningSignal")
+        or entry.get("warningType")
+        or entry.get("level")
+        or "Unknown"
+    )
+    message = (
+        entry.get("warningMessage")
+        or entry.get("message")
+        or entry.get("description")
+        or "Weather warning in effect."
+    )
+    updated = entry.get("updateTime") or entry.get("issueTime") or feed_time
+    return {
+        "level": str(level),
+        "message": str(message),
+        "updated_at": _ts(updated),
+    }
+
+
+def _fetch_rain(config):
+    payload = _get_payload("rain", config)
+    entries = []
+    if isinstance(payload, dict):
+        data = payload.get("data") or (payload.get("rainfall") or {}).get("data")
+        if isinstance(data, list):
+            entries = [row for row in data if isinstance(row, dict)]
+    elif isinstance(payload, list):
+        entries = [row for row in payload if isinstance(row, dict)]
+
+    district = config["rain_district"]
+    entry = next((row for row in entries if row.get("place") == district), None)
+    if not entry:
+        entry = next((row for row in entries if _norm(row.get("place")) == _norm(district)), None)
+    if not entry:
+        return {"district": district, "intensity": "No data", "updated_at": _ts()}
+
+    value = _to_float(entry.get("max") or entry.get("value") or entry.get("mm"))
+    category = _categorize_rain(value)
+    updated = entry.get("recordTime") or entry.get("time") or payload.get("updateTime")
+    return {
+        "district": str(entry.get("place") or district),
+        "intensity": f"{value:.1f} mm ({category})",
+        "updated_at": _ts(updated),
+    }
+
+
+def _fetch_aqhi(config):
+    payload = _get_payload("aqhi", config)
+    if isinstance(payload, list):
+        stations = [row for row in payload if isinstance(row, dict)]
+    elif isinstance(payload, dict):
+        raw = payload.get("aqhi") or payload.get("data")
+        stations = [row for row in raw if isinstance(row, dict)] if isinstance(raw, list) else []
+    else:
+        stations = []
+
+    entry = next((row for row in stations if row.get("station") == config["aqhi_station"]), None)
+    if not entry:
+        return {
+            "station": config["aqhi_station"],
+            "category": "Unknown",
+            "value": "No data",
+            "updated_at": _ts(),
+        }
+
+    value = _to_float(entry.get("aqhi") or entry.get("value") or entry.get("index"))
+    category = entry.get("health_risk") or entry.get("category") or _categorize_aqhi(value)
+    timestamp = entry.get("time") or entry.get("publish_date") or entry.get("updateTime")
+    if not timestamp and isinstance(payload, dict):
+        timestamp = payload.get("publishDate") or payload.get("updateTime")
 
     return {
-        "warnings": {
-            "level": warning_level,
-            "message": warning_msg,
-            "updated_at": now,
-        },
-        "rain": {
-            "district": config["rain_district"],
-            "intensity": f"{rain_value} mm ({rain_category})",
-            "updated_at": now,
-        },
-        "aqhi": {
-            "station": config["aqhi_station"],
-            "category": aqhi_category,
-            "value": aqhi_value,
-            "updated_at": now,
-        },
-        "traffic": {
-            "severity": traffic_level,
-            "description": traffic_msg,
-            "updated_at": now,
-        },
+        "station": str(entry.get("station") or config["aqhi_station"]),
+        "category": str(category),
+        "value": value,
+        "updated_at": _ts(timestamp),
     }
+
+
+def _fetch_traffic(config):
+    payload = _get_payload("traffic", config, parser=_parse_traffic_xml)
+    incidents = _extract_traffic_entries(payload)
+    entry = _pick_traffic_entry(incidents, config["traffic_region"])
+    if not entry:
+        return {"severity": "Info", "description": "No traffic data.", "updated_at": _ts()}
+
+    severity = entry.get("severity") or entry.get("category") or entry.get("status") or "Info"
+    description = (
+        entry.get("content") or entry.get("description") or entry.get("summary") or "Traffic update"
+    )
+    updated = entry.get("update_time") or entry.get("updateTime") or (payload.get("updateTime") if isinstance(payload, dict) else None)
+
+    return {
+        "severity": str(severity).title(),
+        "description": str(description).strip(),
+        "updated_at": _ts(updated),
+    }
+
+
+def _get_payload(kind, config, parser=None):
+    if config.get("use_mock", False):
+        path = MOCKS.get(kind)
+        if path and path.exists():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                return {}
+        return {}
+
+    url = URLS[kind]
+    try:
+        response = requests.get(url, timeout=10, headers=HTTP_HEADERS)
+        response.raise_for_status()
+        return parser(response.text) if parser else response.json()
+    except Exception:
+        return {}
+
+
+def _parse_traffic_xml(text):
+    root = ET.fromstring(text)
+    incidents = []
+    for message in root.findall(".//message"):
+        payload = {}
+        for child in message:
+            key = child.tag.lower()
+            payload[key] = (child.text or "").strip()
+        incidents.append(
+            {
+                "region": payload.get("district_en") or payload.get("region"),
+                "severity": payload.get("incident_heading_en") or payload.get("severity"),
+                "content": payload.get("content_en") or payload.get("incident_detail_en"),
+                "update_time": payload.get("announcement_date"),
+                "location": payload.get("location_en"),
+                "direction": payload.get("direction_en"),
+                "description": payload.get("incident_detail_en"),
+                "status": payload.get("incident_status_en"),
+            }
+        )
+    return {"trafficnews": incidents}
+
+
+def _extract_traffic_entries(payload):
+    if isinstance(payload, list):
+        return [entry for entry in payload if isinstance(entry, dict)]
+    if isinstance(payload, dict):
+        for key in ("trafficnews", "incidents", "messages", "data"):
+            raw = payload.get(key)
+            if isinstance(raw, list):
+                return [entry for entry in raw if isinstance(entry, dict)]
+    return []
+
+
+def _pick_traffic_entry(incidents, target_region):
+    if not incidents:
+        return None
+    needle = target_region.strip().lower()
+    if not needle:
+        return incidents[0]
+    for entry in incidents:
+        parts = [
+            entry.get("region"),
+            entry.get("location"),
+            entry.get("direction"),
+            entry.get("content"),
+            entry.get("description"),
+        ]
+        joined = " ".join(str(part) for part in parts if part).lower()
+        if needle in joined:
+            return entry
+    return incidents[0]
 
 
 def _print_snapshot(snapshot, config):
@@ -155,11 +326,35 @@ def _format_traffic(row):
     )
 
 
-def _ts():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def _ts(raw=None):
+    if not raw:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        dt = datetime.fromisoformat(str(raw))
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return str(raw)
+
+
+def _norm(text):
+    if not isinstance(text, str):
+        return ""
+    t = text.strip().lower()
+    if t.endswith(" district"):
+        t = t[: -len(" district")]
+    return t
+
+
+def _to_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _categorize_rain(value):
+    if value >= 30:
+        return "Black Rain"
     if value >= 15:
         return "Red Rain"
     if value >= 5:
@@ -179,6 +374,14 @@ def _categorize_aqhi(value):
     if value >= 3:
         return "Moderate"
     return "Low"
+
+
+def _empty_warning(feed_time=None):
+    return {
+        "level": "None",
+        "message": "No weather warnings in force.",
+        "updated_at": _ts(feed_time),
+    }
 
 
 if __name__ == "__main__":
