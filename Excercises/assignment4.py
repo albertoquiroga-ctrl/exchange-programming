@@ -376,6 +376,31 @@ def train_models(df: pd.DataFrame, output_dir: Path = OUTPUT_DIR) -> pd.DataFram
             )
             feature_importances.to_csv(output_dir / "feature_importances.csv", index=False)
 
+            # Diagnostics: predicted vs actual and feature importance bar plot.
+            diag_df = pd.DataFrame({"actual": y_test, "pred_random_forest": preds})
+            diag_df.to_csv(output_dir / "random_forest_predictions.csv", index=False)
+
+            plt.figure(figsize=(6, 6))
+            sns.scatterplot(data=diag_df, x="actual", y="pred_random_forest", alpha=0.4)
+            lims = [
+                min(diag_df["actual"].min(), diag_df["pred_random_forest"].min()),
+                max(diag_df["actual"].max(), diag_df["pred_random_forest"].max()),
+            ]
+            plt.plot(lims, lims, color="red", linestyle="--", linewidth=1)
+            plt.xlabel("Actual price per saleable sqft")
+            plt.ylabel("Predicted price per saleable sqft")
+            plt.title("Random forest: actual vs predicted")
+            plt.tight_layout()
+            plt.savefig(output_dir / "random_forest_actual_vs_pred.png", dpi=150)
+            plt.close()
+
+            plt.figure(figsize=(8, 5))
+            sns.barplot(data=feature_importances, x="importance", y="feature", color="steelblue")
+            plt.title("Top random forest feature importances")
+            plt.tight_layout()
+            plt.savefig(output_dir / "random_forest_feature_importance.png", dpi=150)
+            plt.close()
+
     results_df = pd.DataFrame(results)
     results_df.to_csv(output_dir / "model_performance.csv", index=False)
 
