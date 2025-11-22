@@ -271,17 +271,13 @@ class MenuController:
                 return True
         return False
 
-    @staticmethod
-    def _confirm_refresh() -> bool:
+    def _confirm_refresh(self) -> bool:
         """Ask whether a change should trigger an immediate refresh."""
-        response = input("Refresh now? [y/N]: ").strip().lower()
-        return response in {"y", "yes"}
+        return _confirm_refresh()
 
-    @staticmethod
-    def _print_options(options: Sequence[str]) -> None:
+    def _print_options(self, options: Sequence[str]) -> None:
         """List the enumerated options so students can match numbers to text."""
-        for index, value in enumerate(options, start=1):
-            print(f"  {index}. {value}")
+        _print_options(options)
 
 
 class SnapshotPrinter:
@@ -315,52 +311,21 @@ class SnapshotPrinter:
             output_lines.append(section_text)
         print(separator.join(output_lines))
 
-    @staticmethod
-    def _format_warning(row: Optional[sqlite3.Row]) -> str:
+    def _format_warning(self, row: Optional[sqlite3.Row]) -> str:
         """Return a friendly, multi-line message for the warnings tile."""
-        if not row:
-            return "No warning data."
-        return (
-            f"Level: {row['level']}\n"
-            f"Message: {row['message']}\n"
-            f"Updated: {row['updated_at']}"
-        )
+        return _format_warning(row)
 
-    @staticmethod
-    def _format_rain(row: Optional[sqlite3.Row]) -> str:
+    def _format_rain(self, row: Optional[sqlite3.Row]) -> str:
         """Describe rainfall intensity along with the target district."""
-        if not row:
-            return "No rain data."
-        return (
-            f"District: {row['district']}\n"
-            f"Intensity: {row['intensity']}\n"
-            f"Updated: {row['updated_at']}"
-        )
+        return _format_rain(row)
 
-    @staticmethod
-    def _format_aqhi(row: Optional[sqlite3.Row]) -> str:
+    def _format_aqhi(self, row: Optional[sqlite3.Row]) -> str:
         """Summarise the AQHI snapshot for the configured station."""
-        if not row:
-            return "No AQHI data."
-        value = row["value"]
-        value_text = f"{value:.1f}"
-        return (
-            f"Station: {row['station']}\n"
-            f"Category: {row['category']}\n"
-            f"Value: {value_text}\n"
-            f"Updated: {row['updated_at']}"
-        )
+        return _format_aqhi(row)
 
-    @staticmethod
-    def _format_traffic(row: Optional[sqlite3.Row]) -> str:
+    def _format_traffic(self, row: Optional[sqlite3.Row]) -> str:
         """Show the most recent incident with severity and description."""
-        if not row:
-            return "No traffic data."
-        return (
-            f"Severity: {row['severity']}\n"
-            f"{row['description']}\n"
-            f"Updated: {row['updated_at']}"
-        )
+        return _format_traffic(row)
 
 
 class HistoryReporter:
@@ -375,6 +340,65 @@ class HistoryReporter:
         report = build_aqhi_history_report(self.conn, station)
         if report:
             print("\n" + report)
+
+
+def _confirm_refresh() -> bool:
+    """Ask whether a change should trigger an immediate refresh."""
+    response = input("Refresh now? [y/N]: ").strip().lower()
+    return response in {"y", "yes"}
+
+
+def _print_options(options: Sequence[str]) -> None:
+    """List the enumerated options so students can match numbers to text."""
+    for index, value in enumerate(options, start=1):
+        print(f"  {index}. {value}")
+
+
+def _format_warning(row: Optional[sqlite3.Row]) -> str:
+    """Return a friendly, multi-line message for the warnings tile."""
+    if not row:
+        return "No warning data."
+    return (
+        f"Level: {row['level']}\n"
+        f"Message: {row['message']}\n"
+        f"Updated: {row['updated_at']}"
+    )
+
+
+def _format_rain(row: Optional[sqlite3.Row]) -> str:
+    """Describe rainfall intensity along with the target district."""
+    if not row:
+        return "No rain data."
+    return (
+        f"District: {row['district']}\n"
+        f"Intensity: {row['intensity']}\n"
+        f"Updated: {row['updated_at']}"
+    )
+
+
+def _format_aqhi(row: Optional[sqlite3.Row]) -> str:
+    """Summarise the AQHI snapshot for the configured station."""
+    if not row:
+        return "No AQHI data."
+    value = row["value"]
+    value_text = f"{value:.1f}"
+    return (
+        f"Station: {row['station']}\n"
+        f"Category: {row['category']}\n"
+        f"Value: {value_text}\n"
+        f"Updated: {row['updated_at']}"
+    )
+
+
+def _format_traffic(row: Optional[sqlite3.Row]) -> str:
+    """Show the most recent incident with severity and description."""
+    if not row:
+        return "No traffic data."
+    return (
+        f"Severity: {row['severity']}\n"
+        f"{row['description']}\n"
+        f"Updated: {row['updated_at']}"
+    )
 
 
 class _RecordingMessenger(ConsoleMessenger):
