@@ -1,8 +1,7 @@
 """HK Conditions Monitor (simple console).
 
 Single file. Fetches live data from Hong Kong open-data APIs.
-Falls back to bundled mock JSON only when you pass --use-mock or when
-the API call fails. Nothing is stored on disk.
+No database and no mock data; everything shown is from the latest API calls.
 """
 
 import argparse
@@ -19,7 +18,6 @@ DEFAULTS = {
     "aqhi_station": "Central/Western",
     "traffic_region": "Hong Kong Island",
     "poll_interval": 60,
-    "use_mock": False,
 }
 
 URLS = {
@@ -30,12 +28,6 @@ URLS = {
 }
 
 BASE_DIR = Path(__file__).resolve().parent
-MOCKS = {
-    "warnings": BASE_DIR / "tests/data/warnings.json",
-    "rain": BASE_DIR / "tests/data/rainfall.json",
-    "aqhi": BASE_DIR / "tests/data/aqhi.json",
-    "traffic": BASE_DIR / "tests/data/traffic.json",
-}
 
 HTTP_HEADERS = {"User-Agent": "HKConditionsMonitor/1.0 (+https://data.gov.hk)"}
 
@@ -43,10 +35,9 @@ HTTP_HEADERS = {"User-Agent": "HKConditionsMonitor/1.0 (+https://data.gov.hk)"}
 def main():
     args = _parse_args()
     config = DEFAULTS.copy()
-    config["use_mock"] = args.use_mock
 
     print("HK Conditions Monitor")
-    print("Live data when available; mock data only if requested or on errors.\n")
+    print("Live data direct from the HK open-data APIs.\n")
 
     while True:
         snapshot = _collect_snapshot(config)
@@ -66,7 +57,6 @@ def main():
 
 def _parse_args():
     parser = argparse.ArgumentParser(description="Simple HK monitor console")
-    parser.add_argument("--use-mock", action="store_true", help="Force use of local mock JSON files.")
     return parser.parse_args()
 
 
@@ -193,15 +183,6 @@ def _fetch_traffic(config):
 
 
 def _get_payload(kind, config, parser=None):
-    if config.get("use_mock", False):
-        path = MOCKS.get(kind)
-        if path and path.exists():
-            try:
-                return json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                return {}
-        return {}
-
     url = URLS[kind]
     try:
         response = requests.get(url, timeout=10, headers=HTTP_HEADERS)
