@@ -29,10 +29,23 @@ class Config:
     def load(cls, path: Optional[str | Path] = None) -> "Config":
         """Load TOML configuration from the given path or ``config.toml``."""
 
-        config_path = Path(path or "config.toml")
-        if not config_path.exists():
+        primary = Path(path) if path else Path("config.toml")
+        search_paths = [primary]
+        if not path:
+            packaged_default = Path(__file__).resolve().parent / "config.toml"
+            if packaged_default not in search_paths:
+                search_paths.append(packaged_default)
+
+        config_path: Optional[Path] = None
+        for candidate in search_paths:
+            if candidate.exists():
+                config_path = candidate
+                break
+
+        if config_path is None:
+            tried = ", ".join(str(p) for p in search_paths)
             raise FileNotFoundError(
-                f"Configuration file '{config_path}' was not found. "
+                f"Configuration file was not found. Tried: {tried}. "
                 "Copy config.template.toml to config.toml and adjust the values."
             )
 
