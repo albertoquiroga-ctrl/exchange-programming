@@ -1,5 +1,4 @@
 [app]
-database_path = "./final_project.db"
 poll_interval = 300
 rain_district = "Central & Western"
 aqhi_station = "Central/Western"

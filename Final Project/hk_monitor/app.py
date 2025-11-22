@@ -1,361 +1,108 @@
-"""Console demo for the HK Conditions Monitor."""
+"""Beginner-friendly console for the HK Conditions Monitor.
 
-# === Interactive console front-end ===
-
-# This module is the "face" of the pipeline: we parse CLI flags, drive the
-# collectors, persist rows into SQLite, and present a narrated dashboard.  The
-# comments explain the order in which each responsibility executes so the file
-# reads like a guided tour.
-from __future__ import annotations
+All data lives in memory. Refresh the dashboard and type new locations
+whenever you like. No database or advanced patterns.
+"""
 
 import argparse
-import json
-import logging
-import sqlite3
-import sys
 import time
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set
+import sys
 
 try:
-    from . import alerts, collector, db
-    from .alerts import ChangeDetector, ConsoleMessenger
-    from .config import Config
-except ImportError:  # pragma: no cover - allows running as a script
+    from .collector import collect_once
+    from .config import load_config
+    from .alerts import detect_changes, print_alerts
+except ImportError:  # pragma: no cover - allow running as a script
     PACKAGE_ROOT = Path(__file__).resolve().parents[1]
     if str(PACKAGE_ROOT) not in sys.path:
         sys.path.insert(0, str(PACKAGE_ROOT))
-    from hk_monitor import alerts, collector, db
-    from hk_monitor.alerts import ChangeDetector, ConsoleMessenger
-    from hk_monitor.config import Config
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-)
-
-DEFAULT_TRAFFIC_REGIONS = [
-    "Hong Kong Island",
-    "Kowloon",
-    "New Territories",
-    "Lantau Island",
-    "Islands District",
-]
+    from hk_monitor.collector import collect_once
+    from hk_monitor.config import load_config
+    from hk_monitor.alerts import detect_changes, print_alerts
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse CLI options for the dashboard demo."""
-
-    parser = argparse.ArgumentParser(description="HK Conditions Monitor CLI")
+def parse_args():
+    parser = argparse.ArgumentParser(description="HK Conditions Monitor (simple console)")
     parser.add_argument(
         "--config",
         default="config.toml",
         help="Path to the TOML configuration file (default: config.toml)",
     )
     parser.add_argument(
-        "--collect",
+        "--use-mock",
         action="store_true",
-        help="Fetch metrics once before showing the dashboard.",
-    )
-    parser.add_argument(
-        "--alerts",
-        action="store_true",
-        help="Run change detection and print alerts after refreshing data.",
+        help="Force mock data even if the config says otherwise.",
     )
     return parser.parse_args()
 
 
-def main() -> None:
-    """Launch the console dashboard according to the supplied arguments."""
-
+def main():
     args = parse_args()
-    config = Config.load(args.config)
+    config = load_config(args.config)
+    if args.use_mock:
+        config["app"]["use_mock_data"] = True
 
-    # Use the context manager so the SQLite connection closes on every exit
-    # path, even when Ctrl+C interrupts the dashboard loop.
-    with db.connect(config.app.database_path) as conn:
-        dashboard = DashboardSession(config, conn, enable_alerts=args.alerts)
-        if args.collect:
-            dashboard.refresh()
-        dashboard.run(skip_initial_refresh=args.collect)
+    print("HK Conditions Monitor (beginner version)")
+    print("Data is not stored anywhere. Refresh to see fresh values.\n")
 
+    last_snapshot = None
+    while True:
+        snapshot = collect_once(config)
+        _show_snapshot(snapshot, config)
+        alerts = detect_changes(last_snapshot, snapshot)
+        if alerts:
+            print_alerts(alerts)
+        last_snapshot = snapshot
 
-class MenuAction:
-    """Possible outcomes from the menu prompt."""
-
-    REFRESH = "refresh"
-    WAIT = "wait"
-    EXIT = "exit"
-
-
-class DashboardSession:
-    """Coordinate refreshes, prompts, and optional alerting."""
-
-    def __init__(
-        self, config: Config, conn: sqlite3.Connection, enable_alerts: bool = False
-    ) -> None:
-        """Prepare helper objects that own user input, printing, and history."""
-        self.config = config
-        self.conn = conn
-        self.enable_alerts = enable_alerts
-        self.menu = MenuController(config)
-        self.printer = SnapshotPrinter()
-        self.history = HistoryReporter(conn)
-        # Track which tiles changed so ``SnapshotPrinter`` can add emphasis.
-        self._alert_metrics: Set[str] = set()
-
-    def run(self, skip_initial_refresh: bool = False) -> None:
-        """Drive the interactive loop until the user exits or interrupts."""
-        print("Launching HK Conditions Monitor dashboard. Press Ctrl+C or choose 'q' to exit.")
-        skip_refresh = skip_initial_refresh
-        try:
-            while True:
-                # Each loop either triggers a refresh or waits for the timer so
-                # the console output feels like a live dashboard.
-                if not skip_refresh:
-                    self.refresh()
-                else:
-                    skip_refresh = False
-                action = self.menu.prompt()
-                if action == MenuAction.EXIT:
-                    break
-                if action == MenuAction.REFRESH:
-                    continue
-                # Defensive clamp so a student entering "-5" never crashes the loop.
-                wait_seconds = max(0, int(self.config.app.poll_interval))
-                if wait_seconds:
-                    print(f"Waiting {wait_seconds}s before the next automatic refresh...\n")
-                    time.sleep(wait_seconds)
-        except KeyboardInterrupt:
-            print("\nExiting dashboard.")
-
-    def refresh(self) -> None:
-        """Collect new data, redraw the dashboard, and print AQHI history."""
-        logging.info(
-            "Refreshing snapshot for %s / %s / %s",
-            self.config.app.rain_district,
-            self.config.app.aqhi_station,
-            self.config.app.traffic_region,
-        )
-        collector.collect_once(self.config, self.conn)
-        # Reload menu choices so live payloads immediately populate the prompts.
-        self.menu.refresh_options()
-        # After persistence we fetch a fresh view so display + history use
-        # identical data.
-        snapshot = db.get_latest(self.conn)
-        highlights = self._detect_alerts()
-        selection_summary = self.menu.selection_summary()
-        self.printer.display(
-            snapshot,
-            highlights=highlights,
-            selection_info=selection_summary,
-        )
-        self.history.print_report(self.config.app.aqhi_station)
-
-    def _detect_alerts(self) -> Set[str]:
-        """Return the set of metrics whose severity changed on the last refresh."""
-        if not self.enable_alerts:
-            self._alert_metrics = set()
-            return self._alert_metrics
-        messenger = _RecordingMessenger()
-        # Run the storage-layer change detector but keep the alerts in memory
-        # so the UI can highlight the affected tiles.
-        ChangeDetector(self.conn, messenger).run()
-        self._alert_metrics = {message.metric for message in messenger.messages}
-        return self._alert_metrics
+        choice = input("\nPress Enter to refresh, c to change locations, q to quit: ").strip().lower()
+        if choice == "q":
+            break
+        if choice == "c":
+            _ask_for_locations(config)
+            continue
+        wait_seconds = max(0, int(config["app"].get("poll_interval", 0)))
+        if wait_seconds:
+            print(f"Waiting {wait_seconds} seconds...\n")
+            time.sleep(wait_seconds)
 
 
-class MenuController:
-    """Handle user selections for the dashboard menu."""
+def _ask_for_locations(config):
+    app = config["app"]
+    new_rain = input(f"Rain district (current: {app['rain_district']}): ").strip()
+    if new_rain:
+        app["rain_district"] = new_rain
 
-    def __init__(self, config: Config):
-        """Cache menu options and store a reference to the shared config."""
-        self.config = config
-        self._options = _load_menu_options(config)
+    new_aqhi = input(f"AQHI station (current: {app['aqhi_station']}): ").strip()
+    if new_aqhi:
+        app["aqhi_station"] = new_aqhi
 
-    def refresh_options(self) -> None:
-        """Reload menu choices from the latest available payloads."""
-        self._options = _load_menu_options(self.config)
-
-    def prompt(self) -> str:
-        """Run the input loop and return the chosen dashboard action."""
-
-        menu_text = (
-            "Press Enter to refresh now, or choose: "
-            "[d]istrict, [a]qhi, [t]raffic, [w]ait, [q]uit"
-        )
-        while True:
-            # Keep prompting until the user either selects an action or exits;
-            # any blank input triggers an immediate refresh.
-            try:
-                choice = input(f"{menu_text}\n> ").strip().lower()
-            except EOFError:
-                return MenuAction.EXIT
-            if choice in ("", "r"):
-                return MenuAction.REFRESH
-            if choice == "q":
-                return MenuAction.EXIT
-            if choice == "w":
-                return MenuAction.WAIT
-            if choice == "d":
-                changed = self._change_selection("rain", "rain district", "rain_district")
-                if changed and self._confirm_refresh():
-                    return MenuAction.REFRESH
-                continue
-            if choice == "a":
-                changed = self._change_selection("aqhi", "AQHI station", "aqhi_station")
-                if changed and self._confirm_refresh():
-                    return MenuAction.REFRESH
-                continue
-            if choice == "t":
-                changed = self._change_selection("traffic", "traffic region", "traffic_region")
-                if changed and self._confirm_refresh():
-                    return MenuAction.REFRESH
-                continue
-            print("Unknown command. Please choose one of the listed options.")
-
-    def selection_summary(self) -> str:
-        """Describe the currently selected locations for quick reference."""
-        return (
-            "District: {district} | AQHI station: {station} | Traffic region: {region}".format(
-                district=self.config.app.rain_district,
-                station=self.config.app.aqhi_station,
-                region=self.config.app.traffic_region,
-            )
-        )
-
-    def _change_selection(
-        self,
-        option_key: str,
-        label: str,
-        attribute: str,
-    ) -> bool:
-        """Prompt for a new menu selection and update the config in-place."""
-        # Some feeds have a known set of choices, so offer numbered menus first
-        # and fall back to manual text entry when mock data is unavailable.
-        options = self._options.get(option_key, [])
-        current_value = getattr(self.config.app, attribute)
-        print(f"Current {label}: {current_value}")
-        if options:
-            self._print_options(options)
-            selection = input(
-                f"Select a new {label} (number) or press Enter to keep current: "
-            ).strip()
-            if not selection:
-                return False
-            try:
-                index = int(selection) - 1
-            except ValueError:
-                print("Invalid selection, keeping current value.")
-                return False
-            if 0 <= index < len(options):
-                new_value = options[index]
-                if new_value == current_value:
-                    print(f"{label.title()} unchanged.")
-                    return False
-                setattr(self.config.app, attribute, new_value)
-                print(f"Updated {label} to {new_value}.")
-                return True
-            else:
-                print("Selection out of range, keeping current value.")
-                return False
-        else:
-            manual = input(f"Type a new {label} and press Enter (blank to cancel): ").strip()
-            if manual:
-                if manual == current_value:
-                    print(f"{label.title()} unchanged.")
-                    return False
-                setattr(self.config.app, attribute, manual)
-                print(f"Updated {label} to {manual}.")
-                return True
-        return False
-
-    def _confirm_refresh(self) -> bool:
-        """Ask whether a change should trigger an immediate refresh."""
-        return _confirm_refresh()
-
-    def _print_options(self, options: Sequence[str]) -> None:
-        """List the enumerated options so students can match numbers to text."""
-        _print_options(options)
+    new_traffic = input(f"Traffic region (current: {app['traffic_region']}): ").strip()
+    if new_traffic:
+        app["traffic_region"] = new_traffic
 
 
-class SnapshotPrinter:
-    """Format and print the latest snapshot to the console."""
-
-    def display(
-        self,
-        snapshot: Dict[str, Optional[sqlite3.Row]],
-        highlights: Set[str],
-        selection_info: Optional[str],
-    ) -> None:
-        """Assemble the four metric sections and add emphasis where needed."""
-        sections = [
-            ("Warnings", self._format_warning(snapshot.get("warnings"))),
-            ("Rain", self._format_rain(snapshot.get("rain"))),
-            ("AQHI", self._format_aqhi(snapshot.get("aqhi"))),
-            ("Traffic", self._format_traffic(snapshot.get("traffic"))),
-        ]
-
-        separator = "\n" + "=" * 60 + "\n"
-        output_lines: List[str] = []
-        if selection_info:
-            output_lines.append(selection_info)
-        for title, body in sections:
-            # Highlight tiles whose metric changed in the latest refresh.
-            prefix = "*** " if title in highlights else ""
-            suffix = " ***" if title in highlights else ""
-            header = f"{prefix}{title}{suffix}"
-            underline = "-" * len(title)
-            section_text = f"{header}\n{underline}\n{body}"
-            output_lines.append(section_text)
-        print(separator.join(output_lines))
-
-    def _format_warning(self, row: Optional[sqlite3.Row]) -> str:
-        """Return a friendly, multi-line message for the warnings tile."""
-        return _format_warning(row)
-
-    def _format_rain(self, row: Optional[sqlite3.Row]) -> str:
-        """Describe rainfall intensity along with the target district."""
-        return _format_rain(row)
-
-    def _format_aqhi(self, row: Optional[sqlite3.Row]) -> str:
-        """Summarise the AQHI snapshot for the configured station."""
-        return _format_aqhi(row)
-
-    def _format_traffic(self, row: Optional[sqlite3.Row]) -> str:
-        """Show the most recent incident with severity and description."""
-        return _format_traffic(row)
+def _show_snapshot(snapshot, config):
+    selection_line = (
+        f"District: {config['app']['rain_district']} | "
+        f"AQHI: {config['app']['aqhi_station']} | "
+        f"Traffic: {config['app']['traffic_region']}"
+    )
+    print("\n" + "=" * 60)
+    print(selection_line)
+    print("-" * len(selection_line))
+    print("\nWarnings\n--------")
+    print(_format_warning(snapshot.get("warnings")))
+    print("\nRain\n----")
+    print(_format_rain(snapshot.get("rain")))
+    print("\nAQHI\n----")
+    print(_format_aqhi(snapshot.get("aqhi")))
+    print("\nTraffic\n-------")
+    print(_format_traffic(snapshot.get("traffic")))
+    print("=" * 60)
 
 
-class HistoryReporter:
-    """Generate AQHI history tables for the selected station."""
-
-    def __init__(self, conn: sqlite3.Connection):
-        """Store the connection so repeated reports reuse the same handle."""
-        self.conn = conn
-
-    def print_report(self, station: str) -> None:
-        """Print the optional history table below the dashboard snapshot."""
-        report = build_aqhi_history_report(self.conn, station)
-        if report:
-            print("\n" + report)
-
-
-def _confirm_refresh() -> bool:
-    """Ask whether a change should trigger an immediate refresh."""
-    response = input("Refresh now? [y/N]: ").strip().lower()
-    return response in {"y", "yes"}
-
-
-def _print_options(options: Sequence[str]) -> None:
-    """List the enumerated options so students can match numbers to text."""
-    for index, value in enumerate(options, start=1):
-        print(f"  {index}. {value}")
-
-
-def _format_warning(row: Optional[sqlite3.Row]) -> str:
-    """Return a friendly, multi-line message for the warnings tile."""
+def _format_warning(row):
     if not row:
         return "No warning data."
     return (
@@ -365,8 +112,7 @@ def _format_warning(row: Optional[sqlite3.Row]) -> str:
     )
 
 
-def _format_rain(row: Optional[sqlite3.Row]) -> str:
-    """Describe rainfall intensity along with the target district."""
+def _format_rain(row):
     if not row:
         return "No rain data."
     return (
@@ -376,12 +122,13 @@ def _format_rain(row: Optional[sqlite3.Row]) -> str:
     )
 
 
-def _format_aqhi(row: Optional[sqlite3.Row]) -> str:
-    """Summarise the AQHI snapshot for the configured station."""
+def _format_aqhi(row):
     if not row:
         return "No AQHI data."
-    value = row["value"]
-    value_text = f"{value:.1f}"
+    try:
+        value_text = f"{float(row['value']):.1f}"
+    except (TypeError, ValueError):
+        value_text = str(row["value"])
     return (
         f"Station: {row['station']}\n"
         f"Category: {row['category']}\n"
@@ -390,8 +137,7 @@ def _format_aqhi(row: Optional[sqlite3.Row]) -> str:
     )
 
 
-def _format_traffic(row: Optional[sqlite3.Row]) -> str:
-    """Show the most recent incident with severity and description."""
+def _format_traffic(row):
     if not row:
         return "No traffic data."
     return (
@@ -399,231 +145,6 @@ def _format_traffic(row: Optional[sqlite3.Row]) -> str:
         f"{row['description']}\n"
         f"Updated: {row['updated_at']}"
     )
-
-
-class _RecordingMessenger(ConsoleMessenger):
-    """Console messenger that keeps the alert list for highlighting."""
-
-    def __init__(self) -> None:
-        """Initialise the parent console messenger and capture alert history."""
-        super().__init__()
-        self.messages: List[alerts.AlertMessage] = []
-
-    def send(self, message: alerts.AlertMessage) -> None:  # type: ignore[override]
-        """Display the alert and retain it for later highlighting."""
-        super().send(message)
-        self.messages.append(message)
-
-
-# === Menu discovery helpers ===
-
-def _load_menu_options(config: Config) -> Dict[str, List[str]]:
-    """Build lookup tables for every dashboard selection type."""
-
-    return {
-        "rain": _ensure_menu_choices(
-            _build_menu_choices(config.mocks.rainfall, _extract_places),
-            config.app.rain_district,
-        ),
-        "aqhi": _ensure_menu_choices(
-            _build_menu_choices(config.mocks.aqhi, _extract_aqhi_stations),
-            config.app.aqhi_station,
-        ),
-        "traffic": _ensure_menu_choices(
-            _build_menu_choices(config.mocks.traffic, _extract_regions),
-            config.app.traffic_region,
-            fallback=DEFAULT_TRAFFIC_REGIONS,
-        ),
-    }
-
-
-def _build_menu_choices(
-    mock_path: Path, extractor: Callable[[Path], List[str]]
-) -> List[str]:
-    """Read bundled mock files to surface menu prompts."""
-
-    return sorted(extractor(mock_path))
-
-
-def _ensure_menu_choices(
-    options: Sequence[str],
-    current_value: Optional[str],
-    fallback: Optional[Sequence[str]] = None,
-) -> List[str]:
-    """Ensure menus always have usable options and include the current selection."""
-
-    combined: List[str] = list(options)
-    if fallback:
-        combined.extend(fallback)
-    if current_value:
-        combined.append(current_value)
-    return _dedupe_preserve_order(combined)
-
-
-def _dedupe_preserve_order(values: Sequence[str]) -> List[str]:
-    """Remove duplicates from a sequence while keeping the first occurrence."""
-
-    seen: Set[str] = set()
-    ordered: List[str] = []
-    for value in values:
-        if not value or value in seen:
-            continue
-        seen.add(value)
-        ordered.append(value)
-    return ordered
-
-
-def _extract_places(path: Path) -> List[str]:
-    """Read the mock rainfall payload and list the available districts."""
-
-    try:
-        with path.open("r", encoding="utf-8") as fh:
-            payload = json.load(fh)
-    except OSError:
-        return []
-    entries: List[Dict[str, Any]] = []
-    if "rainfall" in payload:
-        rainfall_section = payload.get("rainfall")
-        if isinstance(rainfall_section, dict):
-            entries = rainfall_section.get("data", [])
-    else:
-        entries = payload.get("data", [])
-    places: Set[str] = set()
-    if isinstance(entries, list):
-        for item in entries:
-            # Deduplicate names because the API includes multiple readings per district.
-            if isinstance(item, dict) and item.get("place"):
-                places.add(str(item["place"]))
-    return sorted(places)
-
-
-def _extract_aqhi_stations(path: Path) -> List[str]:
-    """Read the mock AQHI payload and surface unique station names."""
-
-    try:
-        with path.open("r", encoding="utf-8") as fh:
-            payload = json.load(fh)
-    except OSError:
-        return []
-    stations: List[Dict[str, Any]] = []
-    if isinstance(payload, list):
-        stations = [entry for entry in payload if isinstance(entry, dict)]
-    else:
-        raw = payload.get("aqhi") or payload.get("data")
-        if isinstance(raw, list):
-            stations = [entry for entry in raw if isinstance(entry, dict)]
-    # Sorting ensures menu numbering stays stable across runs.
-    names = sorted({str(entry["station"]) for entry in stations if entry.get("station")})
-    return names
-
-
-def _extract_regions(path: Path) -> List[str]:
-    """Read the mock traffic payload and surface named regions."""
-
-    try:
-        with path.open("r", encoding="utf-8") as fh:
-            payload = json.load(fh)
-    except OSError:
-        return []
-    incidents: List[Dict[str, Any]] = []
-    if isinstance(payload, list):
-        incidents = [entry for entry in payload if isinstance(entry, dict)]
-    else:
-        raw = None
-        # Vendors label the array differently, so try a few known keys.
-        for key in ("trafficnews", "incidents", "data"):
-            candidate = payload.get(key)
-            if isinstance(candidate, list):
-                raw = candidate
-                break
-        if isinstance(raw, list):
-            incidents = [entry for entry in raw if isinstance(entry, dict)]
-    # Keep unique region names so menu numbering stays consistent.
-    regions: Set[str] = set()
-    for entry in incidents:
-        region = entry.get("region") or entry.get("area")
-        if region:
-            regions.add(str(region))
-    return sorted(regions)
-
-
-def build_aqhi_history_report(
-    conn: sqlite3.Connection, station: str, limit: int = 8
-) -> Optional[str]:
-    """Return a textual AQHI history table for the selected station."""
-
-    if not station:
-        return None
-    # Fetch the most recent rows for the requested station so the ASCII table
-    # mirrors what the dashboard currently shows.
-    query = """
-        SELECT station, category, value, updated_at
-        FROM aqhi
-        WHERE station = ?
-        ORDER BY datetime(updated_at) DESC
-        LIMIT ?
-    """
-    cursor = conn.execute(query, (station, limit))
-    rows = cursor.fetchall()
-    if not rows:
-        return None
-
-    table_rows: List[List[str]] = []
-    values: List[float] = []
-    for row in rows:
-        timestamp = _format_timestamp(row["updated_at"])
-        value = float(row["value"])
-        values.append(value)
-        table_rows.append(
-            [
-                timestamp,
-                f"{value:.1f}",
-                str(row["category"]),
-            ]
-        )
-
-    headers = ["Timestamp", "AQHI", "Category"]
-    widths = [len(header) for header in headers]
-    for row in table_rows:
-        for index, cell in enumerate(row):
-            widths[index] = max(widths[index], len(cell))
-
-    def _format_row(cells: List[str]) -> str:
-        """Pad each column so the ASCII table stays aligned."""
-        return " | ".join(cell.ljust(widths[index]) for index, cell in enumerate(cells))
-
-    lines = [
-        f"AQHI history for {station}",
-        _format_row(headers),
-        "-+-".join("-" * width for width in widths),
-    ]
-    lines.extend(_format_row(row) for row in table_rows)
-
-    min_value = min(values)
-    max_value = max(values)
-    mean_value = sum(values) / len(values)
-    latest_change = values[0] - values[-1]
-    # Tacking on quick stats gives context without requiring additional graphs.
-    stats_line = (
-        f"Range {min_value:.1f}–{max_value:.1f}, "
-        f"mean {mean_value:.1f}, latest change {latest_change:+.1f}"
-    )
-    lines.append(stats_line)
-    return "\n".join(lines)
-
-
-def _format_timestamp(timestamp: str) -> str:
-    """Normalize timestamps stored via db.ISO_FORMAT into readable text."""
-
-    try:
-        dt = datetime.strptime(timestamp, db.ISO_FORMAT)
-    except ValueError:
-        # Some manual fixtures use ISO8601 without timezone; try the flexible parser.
-        try:
-            dt = datetime.fromisoformat(timestamp)
-        except ValueError:
-            return timestamp
-    return dt.strftime("%Y-%m-%d %H:%M")
 
 
 if __name__ == "__main__":
