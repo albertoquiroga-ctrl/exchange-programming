@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,7 +35,7 @@ OUTPUT_DIR = Path(__file__).resolve().parent / "assignment4_outputs"
 
 # ---------- Cleaning helpers ----------
 
-def _parse_number(text: object) -> float:
+def _parse_number(text: Any) -> float:
     """
     Extract the first numeric value found in a text field.
 
@@ -53,7 +53,7 @@ def _parse_number(text: object) -> float:
     return np.nan
 
 
-def _parse_percent(text: object) -> float:
+def _parse_percent(text: Any) -> float:
     """Convert percentage strings like '413%' to decimal (4.13)."""
     if pd.isna(text):
         return np.nan
@@ -66,7 +66,7 @@ def _parse_percent(text: object) -> float:
         return np.nan
 
 
-def _parse_holding_years(text: object) -> float:
+def _parse_holding_years(text: Any) -> float:
     """Convert holding period text such as '16 years 251 days' into years."""
     if pd.isna(text):
         return np.nan
@@ -127,7 +127,8 @@ def clean_transactions(df: pd.DataFrame) -> pd.DataFrame:
     # Area fields come with HTML remnants like "657ft<sup>2</sup>".
     df["saleable_area"] = df["saleable_area"].apply(_parse_number)
     df["gross_area"] = df["gross_area"].apply(_parse_number)
-    df["gross_area_raw"] = pd.to_numeric(df.get("gross_area_raw"), errors="coerce")
+    gross_series = df["gross_area_raw"] if "gross_area_raw" in df.columns else pd.Series(np.nan, index=df.index)
+    df["gross_area_raw"] = pd.to_numeric(gross_series, errors="coerce")
 
     # Floor parsing: keep the numeric component only.
     df["floor_num"] = df["floor"].apply(_parse_number)
@@ -238,7 +239,7 @@ def run_eda(df: pd.DataFrame, output_dir: Path = OUTPUT_DIR) -> None:
 
     # Distribution of price per saleable sqft.
     plt.figure(figsize=(8, 5))
-    sns.histplot(df["price_per_saleable_sf"], bins=50, kde=True, color="steelblue")
+    sns.histplot(x=df["price_per_saleable_sf"], bins=50, kde=True, color="steelblue")
     plt.xlabel("Price per saleable sqft (HKD)")
     plt.ylabel("Count")
     plt.title("Distribution of price per saleable sqft")
