@@ -31,8 +31,8 @@ class Config:
 
         primary = Path(path) if path else Path("config.toml")
         search_paths = [primary]
-        if not path:
-            packaged_default = Path(__file__).resolve().parent / "config.toml"
+        packaged_default = Path(__file__).resolve().parent / "config.toml"
+        if (not path) or primary.name == "config.toml":
             if packaged_default not in search_paths:
                 search_paths.append(packaged_default)
 
