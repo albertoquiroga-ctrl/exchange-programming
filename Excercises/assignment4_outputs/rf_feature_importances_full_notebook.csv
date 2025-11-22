@@ -1,0 +1,41 @@
+,importance
+categorical__district_Cheung Sha Wan,0.005148195413245543
+categorical__district_Diamond Hill,0.0022844167390728594
+categorical__district_Ho Man Tin,0.002823991427075611
+categorical__district_Hung Hom,0.004731311969021821
+categorical__district_Jordan,0.0016446446340601072
+categorical__district_Kowloon Bay,0.007985588580651931
+categorical__district_Kowloon City,0.001101920614569436
+categorical__district_Kowloon Station,0.17461946392311356
+categorical__district_Kowloon Tong,0.004566712662112494
+categorical__district_Kwun Tong,0.007053764519452117
+categorical__district_Lai Chi Kok,0.0011096160561564483
+categorical__district_Lai King,0.0019157737791368702
+categorical__district_Lam Tin,0.019643742419633892
+categorical__district_Lok Fu,6.0231859549678544e-05
+categorical__district_Mei Foo,0.024534211061216848
+categorical__district_Mong Kok,0.0010192913305416258
+categorical__district_Ngau Chi Wan,0.005912347416590075
+categorical__district_Ngau Tau Kok,0.0026010609541393024
+categorical__district_Olympic,0.04797698170157997
+categorical__district_Prince Edward,0.0005931094812361984
+categorical__district_San Po Kong,0.00323544828473048
+categorical__district_Sham Shui Po,0.0007869014271715545
+categorical__district_Shek Kip Mei,4.5245398524069916e-05
+categorical__district_Tai Kok Tsui,0.003150542976716835
+categorical__district_To Kwa Wan,0.0016856164475648468
+categorical__district_Tsim Sha Tsui,0.021398782066234894
+categorical__district_Whampoa,0.0015808009947763143
+categorical__district_Wong Tai Sin,0.005748088193800053
+categorical__district_Yau Ma Tei,0.0007980017103916782
+categorical__district_Yau Tong,9.936225916663476e-05
+categorical__district_Yau Yat Tsuen,0.006926133183732765
+numeric__saleable_area,0.11359446813860159
+numeric__gross_area,0.13507322912793635
+numeric__floor_num,0.029797818939311476
+numeric__holding_period_years,0.10193936577815603
+numeric__winloss_pct,0.08679227468273223
+numeric__pre_sale_flag,0.0
+numeric__unemployment_rate,0.01846313435910719
+numeric__cpi_index,0.08052288845566741
+numeric__year,0.07103552103352131

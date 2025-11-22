@@ -1,0 +1,16 @@
+,importance
+categorical__district_Kowloon Station,0.17461946392311356
+numeric__gross_area,0.13507322912793635
+numeric__saleable_area,0.11359446813860159
+numeric__holding_period_years,0.10193936577815603
+numeric__winloss_pct,0.08679227468273223
+numeric__cpi_index,0.08052288845566741
+numeric__year,0.07103552103352131
+categorical__district_Olympic,0.04797698170157997
+numeric__floor_num,0.029797818939311476
+categorical__district_Mei Foo,0.024534211061216848
+categorical__district_Tsim Sha Tsui,0.021398782066234894
+categorical__district_Lam Tin,0.019643742419633892
+numeric__unemployment_rate,0.01846313435910719
+categorical__district_Kowloon Bay,0.007985588580651931
+categorical__district_Kwun Tong,0.007053764519452117
