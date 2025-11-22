@@ -300,26 +300,36 @@ def _print_snapshot(snapshot, config):
 
 def _change_locations(config):
     print("\nChange locations (press Enter to keep current)")
-    _print_choices("Rain districts", RAIN_CHOICES)
-    new_rain = input(f"Rain district (current: {config['rain_district']}): ").strip()
-    if new_rain:
-        config["rain_district"] = new_rain
-
-    _print_choices("AQHI stations", AQHI_CHOICES)
-    new_aqhi = input(f"AQHI station (current: {config['aqhi_station']}): ").strip()
-    if new_aqhi:
-        config["aqhi_station"] = new_aqhi
-
-    _print_choices("Traffic regions", TRAFFIC_CHOICES)
-    new_traffic = input(f"Traffic region (current: {config['traffic_region']}): ").strip()
-    if new_traffic:
-        config["traffic_region"] = new_traffic
+    config["rain_district"] = _select_from_list(
+        "Rain districts", RAIN_CHOICES, config["rain_district"]
+    )
+    config["aqhi_station"] = _select_from_list(
+        "AQHI stations", AQHI_CHOICES, config["aqhi_station"]
+    )
+    config["traffic_region"] = _select_from_list(
+        "Traffic regions", TRAFFIC_CHOICES, config["traffic_region"]
+    )
 
 
 def _print_choices(title: str, options: Iterable[str]):
     print(f"\n{title}:")
     for idx, option in enumerate(options, start=1):
         print(f"  {idx}. {option}")
+
+
+def _select_from_list(title: str, options: list[str], current: str) -> str:
+    _print_choices(title, options)
+    raw = input(f"{title[:-1]} (current: {current}): ").strip()
+    if not raw:
+        return current
+    try:
+        index = int(raw) - 1
+    except ValueError:
+        # If not a number, keep current so students don't get errors.
+        return current
+    if 0 <= index < len(options):
+        return options[index]
+    return current
 
 
 def _format_warning(row):

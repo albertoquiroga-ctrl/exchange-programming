@@ -10,5 +10,5 @@ python app.py
 
 When the console shows up:
 - Enter: refresh the data
-- c: change district / station / region
+- c: change district / station / region (type the number shown in the list)
 - q: quit
