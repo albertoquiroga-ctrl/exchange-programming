@@ -1,15 +1,9 @@
-"""HK Conditions Monitor (simple console, live data only).
-
-Single file. Fetches live data from Hong Kong open-data APIs.
-No TOML config, no database, no mocks.
+"""HK Conditions Monitor
 """
 
-import argparse
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
-from typing import Any, Dict, Iterable, List
-
 import requests
 
 # Default starting selections and refresh timing
@@ -17,7 +11,6 @@ DEFAULTS = {
     "rain_district": "Central & Western",
     "aqhi_station": "Central/Western",
     "traffic_region": "Hong Kong Island",
-    "poll_interval": 60,
 }
 
 # Menu options for rain districts (numbered list)
@@ -67,354 +60,504 @@ URLS = {
 
 HTTP_HEADERS = {"User-Agent": "HKConditionsMonitor/1.0 (+https://data.gov.hk)"}
 
+# ----------------------------- MAIN METHOD (FORMAT AND CALL METHODS) --------------------------- ISA
 
-def main():
+def main(): #----************************************************************************
     # Entry point: loop forever until the user quits
-    _parse_args()  # kept for future flags
-    config = DEFAULTS.copy()
+    config = DEFAULTS.copy() #start with defaults
 
     print("HK Conditions Monitor (live data)")
     print("Commands: Enter=refresh, c=change locations, q=quit")
     print("Current choices are shown when changing locations.\n")
 
     while True:
-        snapshot = _collect_snapshot(config)
-        _print_snapshot(snapshot, config)
+        snapshot = collect_snapshot(config)
+        print_snapshot(snapshot, config)
 
         choice = input("\nEnter=refresh | c=change locations | q=quit: ").strip().lower()
         if choice == "q":
             break
         if choice == "c":
-            _change_locations(config)
+            change_locations(config)
             continue
-        wait_seconds = max(0, int(config.get("poll_interval", 0)))
-        if wait_seconds:
-            print(f"Waiting {wait_seconds} seconds...\n")
-            time.sleep(wait_seconds)
+        time.sleep(10) #CAN EDIT SLEEP TIME HERE!! -------------
 
+# ----------------------------- CALLS ALL FETCH METHODS AT ONCE --------------------------- ISA
 
-def _parse_args():
-    # Argparse kept small so we can add flags later if needed
-    parser = argparse.ArgumentParser(description="Simple HK monitor console")
-    return parser.parse_args()
-
-
-def _collect_snapshot(config):
+def collect_snapshot(config): #----************************************************************************
     # Pull one snapshot from each live API
     return {
-        "warnings": _fetch_warning(config),
-        "rain": _fetch_rain(config),
-        "aqhi": _fetch_aqhi(config),
-        "traffic": _fetch_traffic(config),
+        "warnings": fetch_warning(config),
+        "rain": fetch_rain(config),
+        "aqhi": fetch_aqhi(config),
+        "traffic": fetch_traffic(config),
     }
 
+# ----------------------------- FETCH WARNING --------------------------- ZAHEER
 
-def _fetch_warning(config):
-    # Grab the latest weather warning (or say none)
-    payload: Any = _get_payload("warnings")
-    if not isinstance(payload, dict):
-        return _empty_warning()
-    payload_dict: Dict[str, Any] = payload
+def fetch_warning(config): #----************************************************************************
+    # Ask the API for the current warning data
+    data = get_data("warnings")
 
-    feed_time = payload_dict.get("updateTime") or payload_dict.get("issueTime")
-    details = payload_dict.get("details") or payload_dict.get("warning") or payload_dict.get("data")
-    if not isinstance(details, list) or not details:
-        return _empty_warning(feed_time)
+    # If the API didn't return anything, say there are no warnings
+    if not data:
+        return empty_warning()
 
-    entry = details[0]
-    level = (
-        entry.get("warningStatementCode")
-        or entry.get("warningMessageCode")
-        or entry.get("warningSignal")
-        or entry.get("warningType")
-        or entry.get("level")
-        or "Unknown"
-    )
-    message = (
-        entry.get("warningMessage")
-        or entry.get("message")
-        or entry.get("description")
-        or "Weather warning in effect."
-    )
-    updated = entry.get("updateTime") or entry.get("issueTime") or feed_time
+    # Try to find the list of warning entries under a few possible keys
+    details = data.get("details")
+    if details is None:
+        details = data.get("warning")
+    if details is None:
+        details = data.get("data")
+
+    # If we still didn't find anything, treat it as "no warnings"
+    if not details:
+        return empty_warning()
+
+    # Take the first entry as the "latest" warning
+    ltst_warn = details[0]
+
+    # Try several possible fields to figure out the warning level
+    level = None
+    levels = ["warningStatementCode", "warningMessageCode", "warningSignal", "warningType", "level"]
+
+    for lvl in levels:
+        value = ltst_warn.get(lvl)
+        if value:
+            level = value
+            break
+
+    if level is None:
+        level = "Unknown"
+
+    # Try several possible fields to figure out the warning message text
+    message = None
+    messages = ["warningMessage", "message", "description"]
+
+    for mssg in messages:
+        value = ltst_warn.get(mssg)
+        if value:
+            message = value
+            break
+
+    if message is None:
+        message = "No description."
+
+    # Use the entry timestamp if possible; otherwise, use the current time
+    updated = ltst_warn.get("updateTime") or ltst_warn.get("issueTime")
+    if updated is None:
+        updated = get_time()
+
     return {
         "level": str(level),
         "message": str(message),
-        "updated_at": _ts(updated),
+        "updated_at": str(updated),
     }
 
+# ----------------------------- FETCH RAIN --------------------------- RAKHAT
 
-def _fetch_rain(config):
-    # Grab rain reading for the chosen district
-    payload: Any = _get_payload("rain")
+def fetch_rain(config): #----************************************************************************
+    # Ask the API for the current rain data
+    data = get_data("rain")
+
+    # The API usually puts the readings under ["rainfall"]["data"]
+    # If anything is missing, just use an empty list
+
+    rows = []
+
+    if "rainfall" in data:
+        rainfall = data["rainfall"]
+        if "data" in rainfall:
+            rows = rainfall["data"]
+
+    # Keep only items that are dictionaries
     entries = []
-    if isinstance(payload, dict):
-        payload_dict: Dict[str, Any] = payload
-        data = payload_dict.get("data") or (payload_dict.get("rainfall") or {}).get("data")
-        if isinstance(data, list):
-            entries = [row for row in data if isinstance(row, dict)]
-    elif isinstance(payload, list):
-        entries = [row for row in payload if isinstance(row, dict)]
+    for row in rows:
+        if isinstance(row, dict):
+            entries.append(row)
 
+    # Which district did the user pick?
     district = config["rain_district"]
-    entry = next((row for row in entries if row.get("place") == district), None)
-    if not entry:
-        entry = next((row for row in entries if _norm(row.get("place")) == _norm(district)), None)
-    if not entry:
-        return {"district": district, "intensity": "No data", "updated_at": _ts()}
 
-    value = _to_float(entry.get("max") or entry.get("value") or entry.get("mm"))
-    category = _categorize_rain(value)
-    updated = entry.get("recordTime") or entry.get("time")
-    if not updated and isinstance(payload, dict):
-        updated = payload.get("updateTime")
-    return {
-        "district": str(entry.get("place") or district),
-        "intensity": f"{value:.1f} mm ({category})",
-        "updated_at": _ts(updated),
-    }
+    # Find exact match for the district name
+    entry = None
+    for row in entries:
+        if row.get("place") == district:
+            entry = row
+            break
 
+    # If that fails, try a normalized match (ignoring " District", case, etc.)
+    if entry is None:
+        for row in entries:
+            if norm(row.get("place")) == norm(district):
+                entry = row
+                break
 
-def _fetch_aqhi(config):
-    # Grab AQHI reading for the chosen station
-    payload: Any = _get_payload("aqhi")
-    if isinstance(payload, list):
-        stations = [row for row in payload if isinstance(row, dict)]
-    elif isinstance(payload, dict):
-        payload_dict: Dict[str, Any] = payload
-        raw = payload_dict.get("aqhi") or payload_dict.get("data")
-        stations = [row for row in raw if isinstance(row, dict)] if isinstance(raw, list) else []
-    else:
-        stations = []
-
-    entry = next((row for row in stations if row.get("station") == config["aqhi_station"]), None)
-    if not entry:
+    # If we did not find anything, say "No data" for that district
+    if entry is None:
         return {
-            "station": config["aqhi_station"],
-            "category": "Unknown",
-            "value": "No data",
-            "updated_at": _ts(),
+            "district": district,
+            "intensity": "No data",
+            "updated_at": get_time(),
         }
 
-    value = _to_float(entry.get("aqhi") or entry.get("value") or entry.get("index"))
-    category = entry.get("health_risk") or entry.get("category") or _categorize_aqhi(value)
-    timestamp = entry.get("time") or entry.get("publish_date") or entry.get("updateTime")
-    if not timestamp and isinstance(payload, dict):
-        payload_dict: Dict[str, Any] = payload
-        timestamp = payload_dict.get("publishDate") or payload_dict.get("updateTime")
+    # If we did find something, try to read the rain amount from a few possible fields
+    value = entry.get("max")
+    if value is None:
+        value = entry.get("value")
+    if value is None:
+        value = entry.get("mm")
+
+    try:
+        value = float(value)
+    except (TypeError,ValueError):
+        value = 0.0
+
+    # Turn the number into a label like "Showers", "Red Rain", etc.
+    category = categorize_rain(value)
+
+    # Try to get a time for this reading
+    updated = entry.get("recordTime")
+    if updated is None:
+        updated = entry.get("time")
+    if updated is None:
+        updated = get_time()
 
     return {
-        "station": str(entry.get("station") or config["aqhi_station"]),
-        "category": str(category),
-        "value": value,
-        "updated_at": _ts(timestamp),
+        "district": district,
+        "intensity": f"{value:.1f} mm ({category})",
+        "updated_at": str(updated),
     }
 
+# ----------------------------- FETCH AQHI --------------------------- MENGQI
 
-def _fetch_traffic(config):
-    # Grab the most recent traffic incident and match the chosen region
-    payload: Any = _get_payload("traffic", parser=_parse_traffic_xml)
-    incidents = _extract_traffic_entries(payload)
-    entry = _pick_traffic_entry(incidents, config["traffic_region"])
-    if not entry:
-        return {"severity": "Info", "description": "No traffic data.", "updated_at": _ts()}
+def fetch_aqhi(config): #----************************************************************************
+    """Get AQHI (air quality health index) reading for the chosen station."""
+    # Ask the API for AQHI data
+    data = get_data("aqhi")
 
-    severity = entry.get("severity") or entry.get("category") or entry.get("status") or "Info"
-    description = (
-        entry.get("content") or entry.get("description") or entry.get("summary") or "Traffic update"
-    )
-    updated = entry.get("update_time") or entry.get("updateTime")
-    if not updated and isinstance(payload, dict):
-        payload_dict: Dict[str, Any] = payload
-        updated = payload_dict.get("updateTime")
+    # Build a simple list of station dictionaries from whatever the API gave us
+    stations = []
+
+    if isinstance(data, list):
+        # Sometimes the API is already a list of stations
+        for row in data:
+            if isinstance(row, dict):
+                stations.append(row)
+    elif isinstance(data, dict):
+        # Other times the stations are inside "aqhi" or "data"
+        raw = data.get("aqhi")
+        if raw is None:
+            raw = data.get("data")
+
+        if isinstance(raw, list):
+            for row in raw:
+                if isinstance(row, dict):
+                    stations.append(row)
+
+    # Which station did the user pick?
+    target_station = config["aqhi_station"]
+
+    # Try to find that station in the list
+    entry = None
+    for row in stations:
+        if row.get("station") == target_station:
+            entry = row
+            break
+
+    # If we did not find anything, return "No data" for that station
+    if entry is None:
+        return {
+            "station": target_station,
+            "category": "Unknown",
+            "value": "No data",
+            "updated_at": get_time(),
+        }
+
+    # Try to read the AQHI number from a few possible fields
+    raw_value = entry.get("aqhi")
+    if raw_value is None:
+        raw_value = entry.get("value")
+    if raw_value is None:
+        raw_value = entry.get("index")
+
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        value = 0.0
+
+    # Work out the risk category (e.g. "High", "Moderate", etc.)
+    category = entry.get("health_risk")
+    if category is None:
+        category = entry.get("category")
+    if category is None:
+        category = categorize_aqhi(value)
+
+    # Try to figure out when this reading was updated
+    timestamp = entry.get("time")
+    if timestamp is None:
+        timestamp = entry.get("publish_date")
+    if timestamp is None:
+        timestamp = entry.get("updateTime")
+
+    # If we still have no time, fall back to "now"
+    if timestamp is None:
+        timestamp = get_time()
+
+    return {
+        "station": target_station,
+        "category": category,
+        "value": value,
+        "updated_at": str(timestamp),
+    }
+
+# ----------------------------- FETCH TRAFFIC --------------------------- BETO
+
+def fetch_traffic(config): #----************************************************************************
+    """Get traffic info for the chosen region."""
+    # Ask the API for the traffic data
+    data = get_data("traffic")
+
+    # Turn the raw data into a simple list of incident dictionaries
+    incidents = extract_traffic_entries(data)
+
+    # Try to pick one incident that matches the chosen region
+    target_region = config["traffic_region"]
+    entry = pick_traffic_entry(incidents, target_region)
+
+    # If we did not find any incident, return a simple "no data" message
+    if entry is None:
+        return {
+            "severity": "Info",
+            "description": "No traffic data.",
+            "updated_at": get_time(),
+        }
+
+    # Work out the severity (e.g. "Info", "Serious", etc.)
+    severity = entry.get("severity")
+    if severity is None:
+        severity = entry.get("category")
+    if severity is None:
+        severity = entry.get("status")
+    if severity is None:
+        severity = "Info"
+
+    # Work out the description of what is happening
+    description = entry.get("content")
+    if description is None:
+        description = entry.get("description")
+    if description is None:
+        description = entry.get("summary")
+    if description is None:
+        description = "Traffic update"
+
+    # Try to figure out when this incident was last updated
+    updated = entry.get("update_time")
+    if updated is None:
+        updated = entry.get("updateTime")
+
+    # If we still have no time, fall back to "now"
+    if updated is None:
+        updated = get_time()
 
     return {
         "severity": str(severity).title(),
         "description": str(description).strip(),
-        "updated_at": _ts(updated),
+        "updated_at": str(updated)
     }
 
+# ----------------------------- API REQUEST --------------------------- ISA
 
-def _get_payload(kind: str, parser=None) -> Any:
-    # One HTTP GET helper used by all collectors
-    url = URLS[kind]
+def get_data(which): #----************************************************************************
+    """Fetch data from one of the HK API endpoints.
+    which: a string like 'warnings', 'rain', 'aqhi', or 'traffic'
+    """
+    # Pick the right URL based on the kind of data we want
+    url = URLS[which]
+
+    # Ask the server for data
     response = requests.get(url, timeout=10, headers=HTTP_HEADERS)
+
+    # If the HTTP status is not OK (e.g. 404, 500), this will raise an error
     response.raise_for_status()
-    return parser(response.text) if parser else response.json()
 
+    # Traffic feed is XML, so parse it with our XML helper
+    if which == "traffic":
+        return parse_traffic_xml(response.text)
 
-def _parse_traffic_xml(text):
-    # Turn XML traffic feed into a list of dictionaries
+    # Everything else is JSON
+    return response.json()
+
+# ----------------------------- GENERAL HELPER FUNCTIONS --------------------------- EVERYONE
+
+def empty_warning(): #----************************************************************************
+    return {
+        "level": "None",
+        "message": "No weather warnings in force.",
+        "updated_at": get_time(),
+    }
+
+def norm(text): #----************************************************************************
+    """Make a place name easier to compare."""
+    # If it's not a string, just return empty string
+    if not isinstance(text, str):
+        return ""
+
+    # Remove spaces at the edges and make everything lowercase
+    name = text.strip().lower()
+
+    # If it ends with " district", remove that part
+    if name.endswith(" district"):
+        name = name[:-len(" district")]
+
+    return name
+
+def get_time(): #----************************************************************************
+    """Return timestamp"""
+    now = datetime.now()
+    return now.strftime("%Y-%m-%d %H:%M:%S")
+
+# ---------------------------- TRAFFIC HELPER FUNCTIONS --------------------------- BETO
+
+def parse_traffic_xml(text): #----**************************************************************** BETO
+    """Convert the XML traffic feed into a dictionary with a list of incidents.
+
+    The result will look like:
+        {
+            "trafficnews": [
+                {
+                    "region": ...,
+                    "severity": ...,
+                    "content": ...,
+                    "update_time": ...,
+                    "location": ...,
+                    "direction": ...,
+                    "description": ...,
+                    "status": ...,
+                },
+                ...
+            ]
+        }
+    """
+    # Turn the XML string into an XML tree
     root = ET.fromstring(text)
-    incidents: List[Dict[str, Any]] = []
+
+    # This will hold one dictionary per traffic incident
+    incidents = []
+
+    # Go through every <message> element in the XML
     for message in root.findall(".//message"):
-        payload: Dict[str, Any] = {}
+        # First, read all child tags under <message> into a simple dictionary.
+        # Example: <district_en>Hong Kong Island</district_en>
+        # becomes data["district_en"] = "Hong Kong Island"
+        data = {}
         for child in message:
-            key = child.tag.lower()
-            payload[key] = (child.text or "").strip()
-        incidents.append(
-            {
-                "region": payload.get("district_en") or payload.get("region"),
-                "severity": payload.get("incident_heading_en") or payload.get("severity"),
-                "content": payload.get("content_en") or payload.get("incident_detail_en"),
-                "update_time": payload.get("announcement_date"),
-                "location": payload.get("location_en"),
-                "direction": payload.get("direction_en"),
-                "description": payload.get("incident_detail_en"),
-                "status": payload.get("incident_status_en"),
-            }
-        )
+            tag_name = child.tag.lower()           # tag name as lowercase string
+            text_value = (child.text or "").strip()  # text inside the tag (or "" if None)
+            data[tag_name] = text_value
+
+        # Now build a cleaner incident dictionary using the fields we care about.
+        incident = {
+            # Region name (e.g. "Hong Kong Island", "Kowloon", etc.)
+            "region": data.get("district_en") or data.get("region"),
+
+            # Severity / headline of the incident
+            "severity": data.get("incident_heading_en") or data.get("severity"),
+
+            # Main content / description
+            "content": data.get("content_en") or data.get("incident_detail_en"),
+
+            # When the announcement was made
+            "update_time": data.get("announcement_date"),
+
+            # Extra location information
+            "location": data.get("location_en"),
+
+            # Direction of traffic affected
+            "direction": data.get("direction_en"),
+
+            # Longer description of the incident
+            "description": data.get("incident_detail_en"),
+
+            # Status of the incident (e.g. “ongoing”, “cleared”)
+            "status": data.get("incident_status_en"),
+        }
+
+        incidents.append(incident)
+
+    # Wrap the list in a dict so extract_traffic_entries() can find "trafficnews"
     return {"trafficnews": incidents}
 
 
-def _extract_traffic_entries(payload):
-    # Find the list of incidents inside a mixed payload
-    if isinstance(payload, list):
-        return [entry for entry in payload if isinstance(entry, dict)]
-    if isinstance(payload, dict):
-        payload_dict: Dict[str, Any] = payload
-        for key in ("trafficnews", "incidents", "messages", "data"):
-            raw = payload_dict.get(key)
+def extract_traffic_entries(data): #----**************************************************************** BETO
+    """Turn the raw traffic data into a simple list of incident dictionaries."""
+    incidents = []
+
+    # Case 1: the data is already a list of dictionaries
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                incidents.append(item)
+        return incidents
+
+    # Case 2: the data is a dictionary and the list is inside it
+    if isinstance(data, dict):
+        # Try a few possible keys where the API might store the list
+        possible_keys = ["trafficnews", "incidents", "messages", "data"]
+
+        for key in possible_keys:
+            raw = data.get(key)
+
+            # If we find a list under this key, keep only the dict items
             if isinstance(raw, list):
-                return [entry for entry in raw if isinstance(entry, dict)]
-    return []
+                for item in raw:
+                    if isinstance(item, dict):
+                        incidents.append(item)
+                return incidents
+
+    # If we did not find anything usable, return an empty list
+    return incidents
 
 
-def _pick_traffic_entry(incidents, target_region):
-    # Choose the first incident that mentions the target region
+def pick_traffic_entry(incidents, target_region): #----********************************************** BETO
+    """Choose one traffic incident that matches the chosen region."""
+    # If there are no incidents at all, we cannot pick anything
     if not incidents:
         return None
-    needle = target_region.strip().lower()
-    if not needle:
+
+    # Turn the region we are looking for into lowercase text
+    if target_region is None:
+        target_region = ""
+    target = target_region.strip().lower()
+
+    # If the user did not really choose a region, just return the first incident
+    if target == "":
         return incidents[0]
+
+    # Go through each incident and see if it mentions the region
     for entry in incidents:
-        parts = [
-            entry.get("region"),
-            entry.get("location"),
-            entry.get("direction"),
-            entry.get("content"),
-            entry.get("description"),
-        ]
-        joined = " ".join(str(part) for part in parts if part).lower()
-        if needle in joined:
+        # Collect different text fields from the incident
+        parts = []
+
+        for field in ["region", "location", "direction", "content", "description"]:
+            value = entry.get(field)
+            if value:
+                parts.append(str(value))
+
+        # Join everything into one big lowercase string
+        joined = " ".join(parts).lower()
+
+        # If our target text appears anywhere inside this incident text, pick it
+        if target in joined:
             return entry
+
+    # If nothing matched, just fall back to the first incident
     return incidents[0]
 
 
-def _print_snapshot(snapshot, config):
-    # Render the dashboard to the console
-    header = (
-        f"District: {config['rain_district']} | "
-        f"AQHI: {config['aqhi_station']} | "
-        f"Traffic: {config['traffic_region']}"
-    )
-    print("\n" + "=" * 60)
-    print(header)
-    print("-" * len(header))
-    print("\nWarnings\n--------")
-    print(_format_warning(snapshot["warnings"]))
-    print("\nRain\n----")
-    print(_format_rain(snapshot["rain"]))
-    print("\nAQHI\n----")
-    print(_format_aqhi(snapshot["aqhi"]))
-    print("\nTraffic\n-------")
-    print(_format_traffic(snapshot["traffic"]))
-    print("=" * 60)
+# -------------------------------- CATEGORIZING FUNCTIONS ------------------------------------- RAKHAT
 
-
-def _change_locations(config):
-    # Show menus and update the current selections
-    print("\nChange locations (press Enter to keep current)")
-    config["rain_district"] = _select_from_list(
-        "Rain districts", RAIN_CHOICES, config["rain_district"]
-    )
-    config["aqhi_station"] = _select_from_list(
-        "AQHI stations", AQHI_CHOICES, config["aqhi_station"]
-    )
-    config["traffic_region"] = _select_from_list(
-        "Traffic regions", TRAFFIC_CHOICES, config["traffic_region"]
-    )
-
-
-def _print_choices(title: str, options: Iterable[str]):
-    # Print a numbered list for menu selection
-    print(f"\n{title}:")
-    for idx, option in enumerate(options, start=1):
-        print(f"  {idx}. {option}")
-
-
-def _select_from_list(title: str, options: list[str], current: str) -> str:
-    # Read user input; accept a number or keep the current value
-    _print_choices(title, options)
-    raw = input(f"{title[:-1]} (current: {current}): ").strip()
-    if not raw:
-        return current
-    try:
-        index = int(raw) - 1
-    except ValueError:
-        # If not a number, keep current so students don't get errors.
-        return current
-    if 0 <= index < len(options):
-        return options[index]
-    return current
-
-
-def _format_warning(row):
-    return f"Level: {row['level']}\nMessage: {row['message']}\nUpdated: {row['updated_at']}"
-
-
-def _format_rain(row):
-    return (
-        f"District: {row['district']}\n"
-        f"Intensity: {row['intensity']}\n"
-        f"Updated: {row['updated_at']}"
-    )
-
-
-def _format_aqhi(row):
-    return (
-        f"Station: {row['station']}\n"
-        f"Category: {row['category']}\n"
-        f"Value: {row['value']}\n"
-        f"Updated: {row['updated_at']}"
-    )
-
-
-def _format_traffic(row):
-    return (
-        f"Severity: {row['severity']}\n"
-        f"{row['description']}\n"
-        f"Updated: {row['updated_at']}"
-    )
-
-
-def _ts(raw=None):
-    if not raw:
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        dt = datetime.fromisoformat(str(raw))
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return str(raw)
-
-
-def _norm(text):
-    if not isinstance(text, str):
-        return ""
-    t = text.strip().lower()
-    if t.endswith(" district"):
-        t = t[: -len(" district")]
-    return t
-
-
-def _to_float(value):
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _categorize_rain(value):
+def categorize_rain(value): #----************************************************************************
     if value >= 30:
         return "Black Rain"
     if value >= 15:
@@ -426,7 +569,7 @@ def _categorize_rain(value):
     return "Dry"
 
 
-def _categorize_aqhi(value):
+def categorize_aqhi(value): #----************************************************************************
     if value >= 10:
         return "Serious"
     if value >= 7:
@@ -437,14 +580,140 @@ def _categorize_aqhi(value):
         return "Moderate"
     return "Low"
 
+# USER INTEFACE ------------------ COMMAND LINE FORMATTING FUNCTIONS ---------------------- BENNETT
 
-def _empty_warning(feed_time=None):
-    return {
-        "level": "None",
-        "message": "No weather warnings in force.",
-        "updated_at": _ts(feed_time),
-    }
+def print_snapshot(snapshot, config): #----************************************************************************
+    print("\n============================================================")
+    print("District:", config["rain_district"],
+          "| AQHI:", config["aqhi_station"],
+          "| Traffic:", config["traffic_region"])
+    print("------------------------------------------------------------")
+
+    print("\nWarnings")
+    print("--------")
+    print_warning(snapshot["warnings"])
+
+    print("\nRain")
+    print("----")
+    print_rain(snapshot["rain"])
+
+    print("\nAQHI")
+    print("----")
+    print_aqhi(snapshot["aqhi"])
+
+    print("\nTraffic")
+    print("-------")
+    print_traffic(snapshot["traffic"])
+
+    print("============================================================")
+
+def print_warning(row): #----************************************************************************
+    print("Level:", row["level"])
+    print("Message:", row["message"])
+    print("Updated:", row["updated_at"])
 
 
-if __name__ == "__main__":
+def print_rain(row): #----************************************************************************
+    print("District:", row["district"])
+    print("Intensity:", row["intensity"])
+    print("Updated:", row["updated_at"])
+
+
+
+def print_aqhi(row): #----************************************************************************
+    print("Station:", row["station"])
+    print("Category:", row["category"])
+    print("Value:", row["value"])
+    print("Updated:", row["updated_at"])
+
+
+def print_traffic(row): #----************************************************************************
+    print("Severity:", row["severity"])
+    print(row["description"])
+    print("Updated:", row["updated_at"])
+
+
+#-------------------------------------------------------- ISA
+
+def select_from_list(title, options, current): #----************************************************* ISA
+    """Show a numbered menu and let the user pick an option.
+
+    - Press Enter to keep the current value.
+    - Type a number to choose a new option.
+    """
+    # Show the menu title
+    print("\n" + title + ":")
+
+    # Print each option with a number (1, 2, 3, ...)
+    number = 1
+    for option in options:
+        print(f"  {number}. {option}")
+        number = number + 1
+
+    # Ask the user what they want
+    prompt = f"Choose 1-{len(options)} (current: {current}, Enter to keep): "
+    choice = input(prompt).strip()
+
+    # If they just press Enter, keep the current value
+    if choice == "":
+        return current
+
+    # If they type something that is not digits, keep current
+    if not choice.isdigit():
+        return current
+
+    # Turn their choice into a number
+    choice_number = int(choice)
+
+    # If the number is out of range, keep current
+    if choice_number < 1 or choice_number > len(options):
+        return current
+
+    # Convert from 1-based (menu) to 0-based (list index)
+    index = choice_number - 1
+
+    # Return the selected option
+    return options[index]
+
+
+
+def change_locations(config): #----*********************************************************** ISA
+    """Let the user change the selected district/station/region."""
+    print("\nChange locations (press Enter to keep current)")
+
+    # Current choices
+    current_rain = config["rain_district"]
+    current_aqhi = config["aqhi_station"]
+    current_traffic = config["traffic_region"]
+
+    # Ask for a new rain district
+    new_rain = select_from_list(
+        "Rain districts",
+        RAIN_CHOICES,
+        current_rain,
+    )
+
+    # Ask for a new AQHI station
+    new_aqhi = select_from_list(
+        "AQHI stations",
+        AQHI_CHOICES,
+        current_aqhi,
+    )
+
+    # Ask for a new traffic region
+    new_traffic = select_from_list(
+        "Traffic regions",
+        TRAFFIC_CHOICES,
+        current_traffic,
+    )
+
+    # Save the new values back into the config
+    config["rain_district"] = new_rain
+    config["aqhi_station"] = new_aqhi
+    config["traffic_region"] = new_traffic
+
+#---------------------- CALLING MAIN ----------------------------
+if __name__ == "__main__": #----**************************************************************** ISA
     main()
+
+
